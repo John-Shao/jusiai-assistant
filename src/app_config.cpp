@@ -110,6 +110,8 @@ void apply_kv(AppConfig& cfg, const std::string& key, const std::string& value) 
     cfg.fullscreen = parse_bool(v, cfg.fullscreen);
   } else if (key == "autostart") {
     cfg.autostart = parse_bool(v, cfg.autostart);
+  } else if (key == "language") {
+    if (!v.empty()) cfg.language = v;
   } else if (key == "log_level") {
     cfg.log_level = parse_log_level(v, cfg.log_level);
   } else {
@@ -147,6 +149,7 @@ void apply_env(AppConfig& cfg) {
       {"JUSIAI_VOICE", "voice"},
       {"JUSIAI_PROMPT_LABEL", "prompt_label"},
       {"JUSIAI_AUTOSTART", "autostart"},
+      {"JUSIAI_LANGUAGE", "language"},
       {"JUSIAI_LOG_LEVEL", "log_level"},
   };
   for (const auto& e : kEnv) {
@@ -169,6 +172,7 @@ void print_usage(const char* prog) {
       "  --no-video             Do not publish the local camera track\n"
       "  --fullscreen           Start the window in fullscreen\n"
       "  --autostart            Begin the AI call immediately on launch\n"
+      "  --language <lang>      Interface language: zh | en (default zh)\n"
       "  --log-level <lvl>      debug | info | warn | error (default info)\n"
       "  -h, --help             Show this help and exit\n",
       prog);
@@ -287,6 +291,8 @@ AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code) 
       cfg.fullscreen = true;
     } else if (a == "--autostart") {
       cfg.autostart = true;
+    } else if (a == "--language") {
+      if (const char* v = next(i)) cfg.language = v;
     } else if (a == "--log-level") {
       if (const char* v = next(i)) cfg.log_level = parse_log_level(v, cfg.log_level);
     } else {

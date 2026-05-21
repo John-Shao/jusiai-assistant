@@ -46,6 +46,8 @@ struct AppConfig {
   int window_height = 1280;
   bool fullscreen = true;
   bool autostart = false;  // begin the AI call immediately on launch
+  // Interface language: "zh" (Simplified Chinese, default) or "en".
+  std::string language = "zh";
 
   LogLevel log_level = LogLevel::Info;
 

@@ -10,6 +10,7 @@
 
 #include "app_config.h"
 #include "core/assistant_controller.h"
+#include "i18n.h"
 #include "livekit/livekit.h"
 #include "log.h"
 #include "ui/ui_app.h"
@@ -49,6 +50,8 @@ int main(int argc, char** argv) {
   AppConfig config = load_config(argc, argv, should_exit, exit_code);
   if (should_exit) return exit_code;
   set_log_level(config.log_level);
+  // Select the UI language before anything produces user-facing text.
+  set_language(lang_from_string(config.language));
 
   LOG_INFO("JuSi AI Assistant %s starting", JUSIAI_VERSION);
   LOG_INFO("config: %s", config.summary().c_str());

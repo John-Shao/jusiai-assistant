@@ -108,6 +108,7 @@ cd /opt/jusiai && ./run.sh --autostart     # 启动即自动发起 AI 通话（k
 | `audio_mic_gain` | 麦克风软件增益（编解码器 PGA 已足够，默认不额外加）| `1.0` |
 | `autostart` / `--autostart` | 启动即发起通话 | `false` |
 | `fullscreen` | 占满面板 | `true` |
+| `language` / `--language` | 界面语言：`zh`（简体中文）/ `en` | `zh` |
 
 TLS：板上 Buildroot rootfs 无系统 CA 库，应用启动时会自动把 `SSL_CERT_FILE`
 指向与可执行文件同目录的 `ca-certificates.crt`（OpenSSL 与 LiveKit SDK 内的
@@ -120,11 +121,9 @@ rustls 都据此校验）。
 采集 + 扬声器播放（音质正常）→ 完整闭环（创建房间 → 连接 LiveKit → 发布音视频 →
 唤起 AI 助手 → **与 AI 实时语音互动**）。
 
-移植过程中关于板级音频/摄像头的关键发现见下节 §8。其它已知事项：
+移植过程中关于板级音频/摄像头的关键发现见 §8；界面多语言见 §9。其它已知事项：
 
 - **MPP 硬件编解码**：LiveKit SDK 已集成，本应用走 SDK 默认路径。
-- **界面语言**：LVGL 内置 Montserrat 字体仅含拉丁字符，界面文字为英文 + 图标。
-  中文需接入 FreeType + CJK 字体。
 
 ## 8. 板级关键发现（音频 / 摄像头踩坑记录）
 
@@ -200,7 +199,28 @@ LiveKit `AudioSource` 在 `queue_size_ms = 0`（实时直采模式）下，`capt
 aarch64-buildroot-linux-gnu-gcc -O2 tools/alsadiag.c -lasound -lm -o alsadiag
 ```
 
-## 9. 目录结构
+## 9. 界面语言（中文 / 英文）
+
+界面默认**简体中文**，也支持英文，由配置项 `language`（`zh` / `en`）切换。
+
+- 所有界面文案集中在 `src/i18n.cpp` 的 `kZh` / `kEn` 表，`tr(Msg::...)` 按当前
+  语言返回；语言在启动时由 `main.cpp` 依据配置选定。
+- 中文字形：`assets/fonts/lv_font_zh_{14,16,20}.c` 是用 `tools/gen_zh_font.js`
+  从 CJK 字体生成的**子集位图字体**，只含 ASCII + 界面用到的几十个汉字（三个
+  字号合计约 270 KB），直接编进程序，无运行时字体引擎。按钮图标仍用 LVGL 内置
+  的 Montserrat 符号字体。
+- 改动 `src/i18n.cpp` 里的中文后需重新生成字体：
+
+  ```bash
+  npm install -g lv_font_conv
+  node tools/gen_zh_font.js
+  ```
+
+  脚本会扫描 `i18n.cpp` 里的全部非 ASCII 字符并按需重新子集化。默认用随 Windows
+  的 SimHei 生成；产品化建议换开源 CJK 字体（如 Noto Sans SC）：
+  `FONT_TTF=/path/to/font.ttf node tools/gen_zh_font.js`。
+
+## 10. 目录结构
 
 ```
 jusiai-assistant/
@@ -208,14 +228,16 @@ jusiai-assistant/
 ├── build.sh                一键交叉编译
 ├── lv_conf.h               LVGL v8.4 配置
 ├── assets/ca-certificates.crt  随包 CA 根证书
+├── assets/fonts/           子集中文位图字体（lv_font_zh_*.c，生成物）
 ├── lib/                    随仓库的预编译 LiveKit SDK 库（liblivekit*.so）
 ├── scripts/run.sh          板级启动脚本
 ├── cmake/                  LVGL / json 的 FetchContent
 ├── config/                 示例配置
-├── tools/                  板级 ALSA 诊断工具（alsadiag / fdtest）
+├── tools/                  ALSA 诊断工具 + 中文字体生成脚本
 └── src/
     ├── main.cpp
     ├── app_config.*        配置解析
+    ├── i18n.*              界面多语言文案表（中文 / 英文）
     ├── api/                设备 API HTTP 客户端
     ├── rtc/livekit_session.*  LiveKit 会话封装
     ├── media/              V4L2 摄像头、ALSA 音频、帧缓冲

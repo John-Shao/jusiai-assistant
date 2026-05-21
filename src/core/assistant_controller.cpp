@@ -1,14 +1,12 @@
 #include "core/assistant_controller.h"
 
+#include "i18n.h"
 #include "log.h"
 
 namespace jusiai {
 namespace {
 
 constexpr auto kAgentJoinTimeout = std::chrono::seconds(45);
-
-constexpr const char kIdleStatus[] = "Ready";
-constexpr const char kIdleDetail[] = "Tap the call button to begin";
 
 }  // namespace
 
@@ -31,7 +29,7 @@ bool AssistantController::init() {
 
   worker_running_ = true;
   worker_ = std::thread(&AssistantController::worker_loop, this);
-  set_state(AssistantState::Idle, kIdleStatus, kIdleDetail);
+  set_state(AssistantState::Idle, tr(Msg::StatusReady), tr(Msg::HintTapToBegin));
   LOG_INFO("controller: ready (%s)", config_.summary().c_str());
   return true;
 }
@@ -95,9 +93,8 @@ void AssistantController::worker_loop() {
           // Timed out with no event — the agent never showed up.
           lock.unlock();
           if (current_state() == AssistantState::WaitingAgent) {
-            teardown(AssistantState::Error,
-                     "The AI assistant did not respond",
-                     "Please try again");
+            teardown(AssistantState::Error, tr(Msg::ErrAgentNoResponse),
+                     tr(Msg::HintTryAgain));
           }
           continue;
         }
@@ -110,7 +107,8 @@ void AssistantController::worker_loop() {
 
     if (ev.type == EventType::CmdQuit) {
       if (current_state() != AssistantState::Idle) {
-        teardown(AssistantState::Idle, kIdleStatus, kIdleDetail);
+        teardown(AssistantState::Idle, tr(Msg::StatusReady),
+                 tr(Msg::HintTapToBegin));
       }
       break;
     }
@@ -153,14 +151,14 @@ void AssistantController::handle(const Event& ev) {
 
     case EventType::EvAgentOnline:
       if (state == AssistantState::WaitingAgent) {
-        set_state(AssistantState::InCall, "Listening");
+        set_state(AssistantState::InCall, tr(Msg::StatusListening));
       }
       break;
 
     case EventType::EvAgentOffline:
       if (state == AssistantState::InCall) {
-        teardown(AssistantState::Idle, "Call ended",
-                 "The AI assistant left the room");
+        teardown(AssistantState::Idle, tr(Msg::StatusCallEnded),
+                 tr(Msg::HintAgentLeft));
       }
       break;
 
@@ -168,8 +166,9 @@ void AssistantController::handle(const Event& ev) {
       if (state == AssistantState::Connecting ||
           state == AssistantState::WaitingAgent ||
           state == AssistantState::InCall) {
-        teardown(AssistantState::Error, "Disconnected",
-                 ev.text.empty() ? "The connection was lost" : ev.text);
+        teardown(AssistantState::Error, tr(Msg::ErrDisconnected),
+                 ev.text.empty() ? std::string(tr(Msg::HintConnectionLost))
+                                  : ev.text);
       }
       break;
 
@@ -182,14 +181,14 @@ void AssistantController::handle(const Event& ev) {
 
 void AssistantController::do_start() {
   // 1. Create an anonymous 1v1 AI room via the device API.
-  set_state(AssistantState::CreatingRoom, "Creating room...", {});
+  set_state(AssistantState::CreatingRoom, tr(Msg::StatusCreatingRoom), {});
   RoomCredentials creds;
   LOG_INFO("controller: calling device-api create_room ...");
   ApiOutcome o = api_.create_room(config_.device_id, config_.room_name, creds);
   LOG_INFO("controller: create_room -> ok=%d http=%d %s", o.ok, o.http_status,
            o.error.c_str());
   if (!o.ok) {
-    teardown(AssistantState::Error, "Could not create a room", o.error);
+    teardown(AssistantState::Error, tr(Msg::ErrCreateRoom), o.error);
     return;
   }
   room_id_ = creds.room_id;
@@ -197,7 +196,7 @@ void AssistantController::do_start() {
            creds.livekit_url.c_str());
 
   // 2. Join the LiveKit room.
-  set_state(AssistantState::Connecting, "Connecting...");
+  set_state(AssistantState::Connecting, tr(Msg::StatusConnecting));
   session_ = std::make_unique<LiveKitSession>();
 
   LiveKitSession::Callbacks cb;
@@ -217,14 +216,14 @@ void AssistantController::do_start() {
   session_->set_callbacks(std::move(cb));
 
   if (!session_->connect(creds.livekit_url, creds.livekit_token)) {
-    teardown(AssistantState::Error, "Could not connect",
-             "Failed to reach the media server");
+    teardown(AssistantState::Error, tr(Msg::ErrConnect),
+             tr(Msg::HintMediaServer));
     return;
   }
 
   // 3. Publish the local microphone (and camera).
   if (!session_->publish_audio(audio_.audio_source())) {
-    teardown(AssistantState::Error, "Could not publish audio", {});
+    teardown(AssistantState::Error, tr(Msg::ErrPublishAudio), {});
     return;
   }
   audio_.start_mic();
@@ -240,13 +239,12 @@ void AssistantController::do_start() {
   }
 
   // 4. Dispatch the AI agent into the room.
-  set_state(AssistantState::WaitingAgent, "Waking up the AI assistant...");
+  set_state(AssistantState::WaitingAgent, tr(Msg::StatusWakingAgent));
   ApiOutcome a = api_.start_ai_agent(room_id_, config_.device_id,
                                      config_.provider, config_.voice,
                                      config_.prompt_label);
   if (!a.ok) {
-    teardown(AssistantState::Error, "Could not start the AI assistant",
-             a.error);
+    teardown(AssistantState::Error, tr(Msg::ErrStartAgent), a.error);
     return;
   }
 
@@ -256,13 +254,13 @@ void AssistantController::do_start() {
 }
 
 void AssistantController::do_stop() {
-  teardown(AssistantState::Idle, kIdleStatus, kIdleDetail);
+  teardown(AssistantState::Idle, tr(Msg::StatusReady), tr(Msg::HintTapToBegin));
 }
 
 void AssistantController::teardown(AssistantState final_state,
                                    const std::string& status,
                                    const std::string& detail) {
-  set_state(AssistantState::Stopping, "Ending the call...", {});
+  set_state(AssistantState::Stopping, tr(Msg::StatusEndingCall), {});
 
   if (!room_id_.empty()) {
     api_.stop_ai_agent(room_id_);  // best effort
