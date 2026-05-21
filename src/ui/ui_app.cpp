@@ -180,9 +180,17 @@ void UiApp::refresh_status() {
   last_ = s;
   snapshot_valid_ = true;
 
-  // Status pill — status, then a dimmed hint (e.g. "Ready,  Tap the call...").
-  std::string pill = s.status;
-  if (!s.detail.empty()) pill += ",  #9aa0a8 " + s.detail + "#";
+  // Status pill. In the idle state the pill is purely a call-to-action, so it
+  // shows only the hint ("Tap the call button to begin") without the "Ready"
+  // status word. Every other state shows the status, optionally followed by a
+  // dimmed hint (e.g. "Connecting...,  ...").
+  std::string pill;
+  if (s.state == AssistantState::Idle) {
+    pill = s.detail.empty() ? s.status : s.detail;
+  } else {
+    pill = s.status;
+    if (!s.detail.empty()) pill += ",  #9aa0a8 " + s.detail + "#";
+  }
   lv_label_set_text(status_pill_, pill.c_str());
 
   // Call / hang-up button — green to start, red to hang up, grey while stopping.
