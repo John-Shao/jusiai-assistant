@@ -1,0 +1,10 @@
+# Shim for building the LiveKit C++ SDK as a CMake subproject.
+#
+# The SDK's CMakeLists.txt resolves this package-config template via
+# ${CMAKE_SOURCE_DIR} (the top-level project) instead of its own directory,
+# so when the SDK is add_subdirectory()'d it looks for the file *here*.
+# The generated LiveKitConfig.cmake is never consumed — jusiai-assistant
+# links the `livekit` target directly and does not call find_package(LiveKit).
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/LiveKitTargets.cmake")

@@ -1,0 +1,12 @@
+build/
+build-*/
+out/
+deps/
+.devbox/
+*.o
+*.a
+*.so
+*.so.*
+.cache/
+compile_commands.json
+CMakeUserPresets.json
