@@ -29,6 +29,7 @@ class UiApp {
   void refresh_status();             // sync widgets with the controller snapshot
   void refresh_preview();            // scale the latest camera frame to the canvas
   void render_mic_icon(bool muted);  // draw the microphone glyph
+  void render_cam_icon(bool off);    // draw the camera glyph
 
   static void on_primary_clicked(lv_event_t* e);  // call / hang-up
   static void on_mute_clicked(lv_event_t* e);     // microphone
@@ -47,9 +48,10 @@ class UiApp {
   lv_obj_t* mic_btn_ = nullptr;      // left: microphone mute
   lv_obj_t* mic_icon_ = nullptr;
   lv_obj_t* cam_btn_ = nullptr;      // right: camera on/off
-  lv_obj_t* cam_label_ = nullptr;
+  lv_obj_t* cam_icon_ = nullptr;
 
   std::vector<std::uint8_t> mic_icon_buf_;  // microphone glyph canvas buffer
+  std::vector<std::uint8_t> cam_icon_buf_;  // camera glyph canvas buffer
   std::vector<lv_color_t> canvas_buf_;      // full-window preview buffer
   std::vector<int> sx_lut_;                 // cover-scale column map
   std::vector<int> sy_lut_;                 // cover-scale row map

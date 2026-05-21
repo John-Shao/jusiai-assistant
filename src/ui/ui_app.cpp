@@ -117,14 +117,17 @@ void UiApp::build_ui() {
   lv_label_set_text(call_label_, LV_SYMBOL_CALL);
   lv_obj_center(call_label_);
 
-  // Camera (right).
+  // Camera (right). LVGL has no camera symbol, so the glyph is hand-drawn on
+  // a canvas — matching the microphone button.
   cam_btn_ = make_round_button(bar, 70);
   lv_obj_add_event_cb(cam_btn_, &UiApp::on_camera_clicked, LV_EVENT_CLICKED,
                       this);
-  cam_label_ = lv_label_create(cam_btn_);
-  lv_obj_set_style_text_font(cam_label_, &lv_font_montserrat_22, 0);
-  lv_label_set_text(cam_label_, LV_SYMBOL_VIDEO);
-  lv_obj_center(cam_label_);
+  cam_icon_ = lv_canvas_create(cam_btn_);
+  cam_icon_buf_.assign(
+      LV_CANVAS_BUF_SIZE_TRUE_COLOR_ALPHA(kIconSize, kIconSize), 0);
+  lv_canvas_set_buffer(cam_icon_, cam_icon_buf_.data(), kIconSize, kIconSize,
+                       LV_IMG_CF_TRUE_COLOR_ALPHA);
+  lv_obj_center(cam_icon_);
 
   // --- Bottom: AI-content disclaimer -------------------------------------
   lv_obj_t* disclaimer = lv_label_create(scr);
@@ -135,6 +138,7 @@ void UiApp::build_ui() {
   lv_obj_align(disclaimer, LV_ALIGN_BOTTOM_MID, 0, -14);
 
   render_mic_icon(false);
+  render_cam_icon(false);
 }
 
 // Build the cover-scale lookup tables: the camera frame is scaled to fill the
@@ -226,13 +230,11 @@ void UiApp::refresh_status() {
     lv_obj_set_style_bg_color(
         cam_btn_,
         s.cam_muted ? lv_color_hex(0x3a3f47) : lv_color_hex(0xf2f3f5), 0);
-    lv_obj_set_style_text_color(
-        cam_label_, s.cam_muted ? lv_color_white() : lv_color_hex(0x1c2128), 0);
   } else {
     lv_obj_set_style_bg_color(cam_btn_, lv_color_hex(0xf2f3f5), 0);
-    lv_obj_set_style_text_color(cam_label_, lv_color_hex(0x1c2128), 0);
     lv_obj_add_state(cam_btn_, LV_STATE_DISABLED);
   }
+  render_cam_icon(in_call && s.cam_muted);
 }
 
 void UiApp::refresh_preview() {
@@ -321,6 +323,58 @@ void UiApp::render_mic_icon(bool muted) {
   }
 
   lv_obj_invalidate(mic_icon_);
+}
+
+// Draw a camera glyph (body + viewfinder bump + lens ring) onto the canvas.
+// LVGL has no built-in camera symbol, so it is drawn directly — matching the
+// hand-drawn microphone button. `off` adds a slash and switches to a white
+// glyph for the darkened "camera off" button.
+void UiApp::render_cam_icon(bool off) {
+  if (!cam_icon_) return;
+  const lv_color_t fg = off ? lv_color_white() : lv_color_hex(0x1c2128);
+
+  lv_canvas_fill_bg(cam_icon_, lv_color_black(), LV_OPA_TRANSP);
+
+  // Body — a rounded-rectangle outline.
+  lv_draw_rect_dsc_t body;
+  lv_draw_rect_dsc_init(&body);
+  body.bg_opa = LV_OPA_TRANSP;
+  body.radius = 3;
+  body.border_color = fg;
+  body.border_width = 2;
+  body.border_opa = LV_OPA_COVER;
+  lv_canvas_draw_rect(cam_icon_, 2, 8, 22, 15, &body);
+
+  // Viewfinder bump — a small filled tab straddling the body's top edge.
+  lv_draw_rect_dsc_t bump;
+  lv_draw_rect_dsc_init(&bump);
+  bump.bg_color = fg;
+  bump.bg_opa = LV_OPA_COVER;
+  bump.radius = 1;
+  lv_canvas_draw_rect(cam_icon_, 8, 3, 10, 6, &bump);
+
+  // Lens — a ring centred in the body.
+  lv_draw_rect_dsc_t lens;
+  lv_draw_rect_dsc_init(&lens);
+  lens.bg_opa = LV_OPA_TRANSP;
+  lens.radius = LV_RADIUS_CIRCLE;
+  lens.border_color = fg;
+  lens.border_width = 2;
+  lens.border_opa = LV_OPA_COVER;
+  lv_canvas_draw_rect(cam_icon_, 7, 10, 12, 12, &lens);
+
+  // Camera off — a diagonal slash across the glyph.
+  if (off) {
+    lv_draw_line_dsc_t slash;
+    lv_draw_line_dsc_init(&slash);
+    slash.color = fg;
+    slash.width = 2;
+    slash.opa = LV_OPA_COVER;
+    lv_point_t sl[2] = {{4, 4}, {22, 22}};
+    lv_canvas_draw_line(cam_icon_, sl, 2, &slash);
+  }
+
+  lv_obj_invalidate(cam_icon_);
 }
 
 void UiApp::run() {
