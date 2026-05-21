@@ -6,8 +6,9 @@
 # ALSA — no SDL/GPU (the RV1126B has no 3D GPU).
 #
 # The LiveKit SDK is consumed as a *prebuilt* aarch64 shared library (it is a
-# large Rust + WebRTC tree that is cross-built separately, once). Point
-# LIVEKIT_SDK_DIR at its source tree and LIVEKIT_SDK_BUILD at its build dir.
+# large Rust + WebRTC tree that is cross-built separately, once). The .so files
+# are vendored in this repo's lib/ directory; LIVEKIT_SDK_DIR only needs to
+# point at the SDK source tree for its headers.
 #
 # Cross-compiled with the SDK's RV1126B toolchain:
 #   source <sdk>/scripts/env-rv1126b.sh
@@ -41,24 +42,29 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # ---------------------------------------------------------------------------
 # LiveKit C++ SDK — prebuilt aarch64 shared libraries.
+#
+# The .so files are *vendored* in this project's lib/ directory: they are a
+# large Rust + WebRTC tree, cross-built separately and version-pinned here so
+# the app builds without the SDK build tree on hand. Headers still come from
+# the SDK source tree — point LIVEKIT_SDK_DIR at it.
 # ---------------------------------------------------------------------------
 set(LIVEKIT_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../livekit-sdk-cpp"
     CACHE PATH "Path to the livekit-sdk-cpp source tree (for headers)")
 get_filename_component(LIVEKIT_SDK_DIR "${LIVEKIT_SDK_DIR}" ABSOLUTE)
 
-set(LIVEKIT_SDK_BUILD "${LIVEKIT_SDK_DIR}/build-rv1126b"
-    CACHE PATH "Path to the livekit-sdk-cpp aarch64 build directory")
+set(LIVEKIT_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib"
+    CACHE PATH "Directory holding the vendored prebuilt LiveKit .so files")
 
 if(NOT EXISTS "${LIVEKIT_SDK_DIR}/include/livekit/livekit.h")
   message(FATAL_ERROR "LiveKit SDK headers not found under ${LIVEKIT_SDK_DIR}/include")
 endif()
 # Explicit paths — find_library() would be re-rooted into the cross sysroot.
-set(LIVEKIT_SO     "${LIVEKIT_SDK_BUILD}/lib/liblivekit.so")
-set(LIVEKIT_FFI_SO "${LIVEKIT_SDK_BUILD}/lib/liblivekit_ffi.so")
+set(LIVEKIT_SO     "${LIVEKIT_LIB_DIR}/liblivekit.so")
+set(LIVEKIT_FFI_SO "${LIVEKIT_LIB_DIR}/liblivekit_ffi.so")
 if(NOT EXISTS "${LIVEKIT_SO}" OR NOT EXISTS "${LIVEKIT_FFI_SO}")
   message(FATAL_ERROR
     "Prebuilt liblivekit.so / liblivekit_ffi.so not found under "
-    "${LIVEKIT_SDK_BUILD}/lib — cross-build the SDK first.")
+    "${LIVEKIT_LIB_DIR} — they are vendored in the repo's lib/ directory.")
 endif()
 
 # The executable links only liblivekit.so (whose SONAME is "liblivekit.so").
@@ -123,7 +129,7 @@ target_link_libraries(jusiai-assistant PRIVATE
 # our executable, and don't fail on its private undefined symbols.
 target_link_options(jusiai-assistant PRIVATE
   -Wl,--allow-shlib-undefined
-  "-Wl,-rpath-link,${LIVEKIT_SDK_BUILD}/lib")
+  "-Wl,-rpath-link,${LIVEKIT_LIB_DIR}")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(jusiai-assistant PRIVATE

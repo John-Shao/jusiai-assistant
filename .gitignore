@@ -7,6 +7,8 @@ deps/
 *.a
 *.so
 *.so.*
+# ...but the prebuilt LiveKit SDK libraries are vendored in lib/ on purpose.
+!lib/*.so
 .cache/
 compile_commands.json
 CMakeUserPresets.json

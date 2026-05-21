@@ -45,9 +45,10 @@ RV1126B 无 3D GPU，平台层从 SDL3 全部换成板原生接口：
 ### 3.1 依赖前提（交叉编译机）
 
 1. **ATK RV1126B SDK** —— 提供 `aarch64-buildroot-linux-gnu-` 工具链与 sysroot。
-2. **LiveKit C++ SDK（已移植、已交叉编译）** —— 分支 `port/rv1126b-*`，已产出
-   aarch64 的 `build-rv1126b/lib/liblivekit.so` 与 `liblivekit_ffi.so`。本项目以
-   **预编译库**方式链接它，不重新编译。
+2. **LiveKit C++ SDK 头文件** —— 分支 `port/rv1126b-*` 的源码树，编译时取其
+   `include/` 头文件（`LIVEKIT_SDK_DIR` 指向它）。预编译的 aarch64 共享库
+   `liblivekit.so` / `liblivekit_ffi.so` 已**随仓库放在 `lib/` 目录**，以预编译
+   库方式链接、不重新编译；更新 SDK 版本时替换 `lib/` 下这两个文件即可。
 3. **暂存依赖**（避免构建时联网）：
    - LVGL v8.4 源码、nlohmann-json —— 放进项目 `deps/` 或 `~/lk-deps/`。
    - `build.sh` 会按内容自动识别并设置 `FETCHCONTENT_SOURCE_DIR_*`。
@@ -207,6 +208,7 @@ jusiai-assistant/
 ├── build.sh                一键交叉编译
 ├── lv_conf.h               LVGL v8.4 配置
 ├── assets/ca-certificates.crt  随包 CA 根证书
+├── lib/                    随仓库的预编译 LiveKit SDK 库（liblivekit*.so）
 ├── scripts/run.sh          板级启动脚本
 ├── cmake/                  LVGL / json 的 FetchContent
 ├── config/                 示例配置
