@@ -1,6 +1,7 @@
 #include "ui/ui_app.h"
 
-#include <SDL3/SDL.h>
+#include <chrono>
+#include <thread>
 
 #include <algorithm>
 #include <string>
@@ -319,7 +320,7 @@ void UiApp::run() {
     refresh_status();
     refresh_preview();
     display_.render();
-    SDL_Delay(8);
+    std::this_thread::sleep_for(std::chrono::milliseconds(8));
   }
   LOG_INFO("ui: window closed");
 }

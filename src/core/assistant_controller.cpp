@@ -14,10 +14,11 @@ constexpr const char kIdleDetail[] = "Tap the call button to begin";
 
 AssistantController::AssistantController(const AppConfig& config)
     : config_(config),
-      api_(config.base_url, config.device_api_key),
-      audio_(config.audio_sample_rate, config.audio_channels),
+      api_(config.base_url, config.device_api_key, config.tls_verify),
+      audio_(config.audio_sample_rate, config.audio_channels,
+             config.audio_mic_gain),
       camera_(config.camera_width, config.camera_height, config.camera_fps,
-              &preview_) {}
+              config.camera_rotation, config.camera_device, &preview_) {}
 
 AssistantController::~AssistantController() { shutdown(); }
 
@@ -183,12 +184,17 @@ void AssistantController::do_start() {
   // 1. Create an anonymous 1v1 AI room via the device API.
   set_state(AssistantState::CreatingRoom, "Creating room...", {});
   RoomCredentials creds;
+  LOG_INFO("controller: calling device-api create_room ...");
   ApiOutcome o = api_.create_room(config_.device_id, config_.room_name, creds);
+  LOG_INFO("controller: create_room -> ok=%d http=%d %s", o.ok, o.http_status,
+           o.error.c_str());
   if (!o.ok) {
     teardown(AssistantState::Error, "Could not create a room", o.error);
     return;
   }
   room_id_ = creds.room_id;
+  LOG_INFO("controller: room %s, livekit url=%s", creds.room_id.c_str(),
+           creds.livekit_url.c_str());
 
   // 2. Join the LiveKit room.
   set_state(AssistantState::Connecting, "Connecting...");
@@ -282,6 +288,8 @@ void AssistantController::teardown(AssistantState final_state,
 void AssistantController::set_state(AssistantState state,
                                     const std::string& status,
                                     const std::string& detail) {
+  LOG_INFO("controller: state[%d] %s%s%s", static_cast<int>(state),
+           status.c_str(), detail.empty() ? "" : " | ", detail.c_str());
   std::lock_guard<std::mutex> lock(state_mutex_);
   state_ = state;
   status_text_ = status;

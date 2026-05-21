@@ -1,36 +1,37 @@
-// Camera engine: captures webcam frames, mirrors them to the UI preview and
-// (while publishing is enabled) into a livekit::VideoSource.
+// Camera engine (RV1126B): captures webcam frames via V4L2, mirrors them to
+// the UI preview and (while publishing is enabled) into a livekit::VideoSource.
 //
-// Capture runs on its own thread. Every frame is normalised to a fixed
-// resolution so the VideoSource can be created eagerly and reused across
-// conversations. If no camera is present the engine falls back to a synthetic
-// animated frame so the preview and the published track still work.
+// Capture runs on its own thread. The RV1126B camera sensor is mounted with a
+// physical rotation, so every frame is rotated by `rotation` degrees and
+// normalised to a fixed output resolution. If the camera cannot be opened the
+// engine falls back to a synthetic animated frame.
 #pragma once
 
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
 #include "livekit/video_source.h"
 
-class SDLCamSource;
-
 namespace jusiai {
 
 class FrameBuffer;
+class V4l2Capture;  // defined in camera_io.cpp
 
 class CameraEngine {
  public:
-  CameraEngine(int width, int height, int fps, FrameBuffer* preview);
+  // `width`/`height` are the OUTPUT (post-rotation) resolution. `rotation` is
+  // 0/90/180/270 degrees clockwise applied to the captured sensor frame.
+  CameraEngine(int width, int height, int fps, int rotation,
+               std::string device, FrameBuffer* preview);
   ~CameraEngine();
 
   CameraEngine(const CameraEngine&) = delete;
   CameraEngine& operator=(const CameraEngine&) = delete;
 
-  // Open the camera and start streaming preview frames. The VideoSource is
-  // created here and stays valid until the engine is destroyed.
   bool start();
   void stop();
 
@@ -49,16 +50,17 @@ class CameraEngine {
 
  private:
   void capture_loop();
-  void deliver(int width, int height, const std::vector<std::uint8_t>& rgba,
-               std::int64_t timestamp_us);
+  void deliver(const std::vector<std::uint8_t>& rgba, std::int64_t timestamp_us);
 
-  const int width_;   // fixed output resolution every frame is scaled to
-  const int height_;
+  const int width_;      // output width (post-rotation)
+  const int height_;     // output height (post-rotation)
   const int fps_;
+  const int rotation_;   // 0 / 90 / 180 / 270
+  const std::string device_;
   FrameBuffer* preview_;  // not owned
 
   std::shared_ptr<livekit::VideoSource> video_source_;
-  std::unique_ptr<SDLCamSource> camera_;
+  std::unique_ptr<V4l2Capture> camera_;
   std::thread capture_thread_;
   std::atomic<bool> running_{false};
   std::atomic<bool> has_camera_{false};

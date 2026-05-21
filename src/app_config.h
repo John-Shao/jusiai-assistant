@@ -13,6 +13,9 @@ struct AppConfig {
   // --- Backend (JuSi Meet device API) ---
   std::string base_url = "https://meet.jusiai.com";
   std::string device_api_key = "jusi-device-2025";
+  // Verify the backend's TLS certificate. Off by default: the RV1126B
+  // Buildroot rootfs ships no CA bundle (auth is the pre-shared device key).
+  bool tls_verify = false;
   std::string device_id;                       // auto-generated if empty
   std::string room_name = "Linux AI 助手";
 
@@ -22,17 +25,26 @@ struct AppConfig {
   std::string prompt_label = "通用 AI 助手";
 
   // --- Media ---
-  int camera_width = 640;
-  int camera_height = 480;
+  // camera_width/height are the OUTPUT (post-rotation) resolution. The
+  // RV1126B sensor is mounted rotated, so frames are rotated camera_rotation
+  // degrees clockwise before use.
+  int camera_width = 480;
+  int camera_height = 640;
   int camera_fps = 30;
+  int camera_rotation = 90;                       // 0 | 90 | 180 | 270
+  std::string camera_device = "/dev/video-camera0";
   int audio_sample_rate = 48000;
   int audio_channels = 1;
+  // Extra software gain on the mic. The ES8389 codec setup (alsa_setup.c)
+  // already brings the level up, so 1.0 (none) is the default.
+  float audio_mic_gain = 1.0f;
   bool publish_video = true;
 
   // --- UI ---
-  int window_width = 1024;
-  int window_height = 600;
-  bool fullscreen = false;
+  // window_* are hints; on the board the panel size comes from the framebuffer.
+  int window_width = 720;
+  int window_height = 1280;
+  bool fullscreen = true;
   bool autostart = false;  // begin the AI call immediately on launch
 
   LogLevel log_level = LogLevel::Info;

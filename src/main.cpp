@@ -1,14 +1,44 @@
-// JuSi AI Assistant — Linux audio/video AI assistant client.
+// JuSi AI Assistant — RV1126B audio/video AI assistant client.
 //
-// Reproduces the one-tap "AI 助手" flow of the JuSi Meet Android app on Linux,
-// built on the LiveKit C++ SDK with an LVGL (SDL3) GUI.
-#include <SDL3/SDL.h>
+// Reproduces the one-tap "AI 助手" flow of the JuSi Meet Android app on the
+// Rockchip RV1126B board, built on the LiveKit C++ SDK with an LVGL GUI
+// rendered to the Linux framebuffer (V4L2 camera, ALSA audio, no SDL/GPU).
+#include <unistd.h>
+
+#include <cstdlib>
+#include <string>
 
 #include "app_config.h"
 #include "core/assistant_controller.h"
 #include "livekit/livekit.h"
 #include "log.h"
 #include "ui/ui_app.h"
+
+namespace {
+
+// The RV1126B Buildroot rootfs ships no system CA store, so point the TLS
+// libraries (OpenSSL for the device API, rustls inside the LiveKit SDK) at the
+// ca-certificates.crt staged next to the executable. Honour an existing
+// SSL_CERT_FILE if the operator set one.
+void configure_tls_bundle() {
+  if (std::getenv("SSL_CERT_FILE")) return;
+
+  char buf[1024];
+  ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+  if (n <= 0) return;
+  buf[n] = '\0';
+
+  std::string path(buf);
+  const auto slash = path.find_last_of('/');
+  if (slash == std::string::npos) return;
+  const std::string ca = path.substr(0, slash) + "/ca-certificates.crt";
+  if (access(ca.c_str(), R_OK) != 0) return;
+
+  setenv("SSL_CERT_FILE", ca.c_str(), 1);
+  LOG_INFO("tls: using CA bundle %s", ca.c_str());
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
   using namespace jusiai;
@@ -23,14 +53,7 @@ int main(int argc, char** argv) {
   LOG_INFO("JuSi AI Assistant %s starting", JUSIAI_VERSION);
   LOG_INFO("config: %s", config.summary().c_str());
 
-  // --- SDL ----------------------------------------------------------------
-  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
-    LOG_ERROR("SDL_Init failed: %s", SDL_GetError());
-    return 1;
-  }
-  if (!SDL_InitSubSystem(SDL_INIT_CAMERA)) {
-    LOG_WARN("SDL camera subsystem unavailable: %s", SDL_GetError());
-  }
+  configure_tls_bundle();
 
   // --- LiveKit SDK --------------------------------------------------------
   // Must run before any AudioSource / VideoSource / Room is created.
@@ -52,14 +75,13 @@ int main(int argc, char** argv) {
           LOG_INFO("autostart: beginning the AI call");
           controller.request_start();
         }
-        ui.run();  // blocks until the window is closed
+        ui.run();  // blocks until SIGINT/SIGTERM
       }
     }
     controller.shutdown();
   }
 
   livekit::shutdown();
-  SDL_Quit();
   LOG_INFO("JuSi AI Assistant stopped");
   return result;
 }

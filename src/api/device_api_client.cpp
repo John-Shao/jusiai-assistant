@@ -47,9 +47,11 @@ std::string describe_transport_error(httplib::Error err) {
 
 }  // namespace
 
-DeviceApiClient::DeviceApiClient(std::string base_url, std::string device_api_key)
+DeviceApiClient::DeviceApiClient(std::string base_url,
+                                 std::string device_api_key, bool verify_tls)
     : base_url_(std::move(base_url)),
-      auth_header_("Bearer " + device_api_key) {}
+      auth_header_("Bearer " + device_api_key),
+      verify_tls_(verify_tls) {}
 
 ApiOutcome DeviceApiClient::post_json(const std::string& path,
                                       const std::string& body,
@@ -61,6 +63,7 @@ ApiOutcome DeviceApiClient::post_json(const std::string& path,
   cli.set_read_timeout(kReadTimeoutSec);
   cli.set_write_timeout(kReadTimeoutSec);
   cli.set_follow_location(true);
+  cli.enable_server_certificate_verification(verify_tls_);
 
   httplib::Headers headers = {{"Authorization", auth_header_}};
   LOG_DEBUG("device-api: POST %s%s", base_url_.c_str(), path.c_str());

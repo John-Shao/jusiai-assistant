@@ -9,7 +9,7 @@
 #include "app_config.h"
 #include "core/assistant_controller.h"
 #include "lvgl.h"
-#include "ui/lv_sdl_disp.h"
+#include "ui/lv_display.h"
 
 namespace jusiai {
 
@@ -36,7 +36,7 @@ class UiApp {
 
   AssistantController* controller_;
   AppConfig config_;
-  LvSdlDisplay display_;
+  LvDisplay display_;
 
   // Widgets.
   lv_obj_t* canvas_ = nullptr;       // full-window camera preview

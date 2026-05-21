@@ -39,6 +39,14 @@ int parse_int(const std::string& v, int fallback) {
   }
 }
 
+float parse_float(const std::string& v, float fallback) {
+  try {
+    return std::stof(trim(v));
+  } catch (...) {
+    return fallback;
+  }
+}
+
 LogLevel parse_log_level(const std::string& v, LogLevel fallback) {
   std::string s = trim(v);
   std::transform(s.begin(), s.end(), s.begin(),
@@ -64,6 +72,8 @@ void apply_kv(AppConfig& cfg, const std::string& key, const std::string& value) 
     if (!v.empty()) cfg.base_url = v;
   } else if (key == "device_api_key") {
     if (!v.empty()) cfg.device_api_key = v;
+  } else if (key == "tls_verify") {
+    cfg.tls_verify = parse_bool(v, cfg.tls_verify);
   } else if (key == "device_id") {
     cfg.device_id = v;
   } else if (key == "room_name") {
@@ -80,10 +90,16 @@ void apply_kv(AppConfig& cfg, const std::string& key, const std::string& value) 
     cfg.camera_height = parse_int(v, cfg.camera_height);
   } else if (key == "camera_fps") {
     cfg.camera_fps = parse_int(v, cfg.camera_fps);
+  } else if (key == "camera_rotation") {
+    cfg.camera_rotation = parse_int(v, cfg.camera_rotation);
+  } else if (key == "camera_device") {
+    if (!v.empty()) cfg.camera_device = v;
   } else if (key == "audio_sample_rate") {
     cfg.audio_sample_rate = parse_int(v, cfg.audio_sample_rate);
   } else if (key == "audio_channels") {
     cfg.audio_channels = parse_int(v, cfg.audio_channels);
+  } else if (key == "audio_mic_gain") {
+    cfg.audio_mic_gain = parse_float(v, cfg.audio_mic_gain);
   } else if (key == "publish_video") {
     cfg.publish_video = parse_bool(v, cfg.publish_video);
   } else if (key == "window_width") {

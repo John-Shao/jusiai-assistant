@@ -1,112 +1,90 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# Build helper for JuSi AI Assistant (Linux).
+# Cross-compile JuSi AI Assistant for the Rockchip RV1126B board.
 #
-#   ./build.sh [release|debug] [options]
+#   ./build.sh [--sdk <livekit-sdk-cpp dir>] [--deps <dir>] [--clean]
 #
-# Options:
-#   --sdk <dir>     Path to the livekit-sdk-cpp checkout (dev branch).
-#                   Default: ../livekit-sdk-cpp
-#   --deps <dir>    Directory of pre-staged dependencies, for hosts whose
-#                   GitHub access is unreliable. Recognised sub-directories:
-#                     spdlog-*/           -> spdlog source
-#                     SDL-*/ | SDL3-*/    -> SDL3 source
-#                     lvgl-*/             -> LVGL v8.4 source
-#                     json/               -> nlohmann-json source
-#                     *-release/          -> extracted prebuilt libwebrtc
-#                   Any entry that is absent is downloaded normally.
-#   --clean         Remove the build directory before configuring.
-#
-# The LiveKit SDK is compiled as part of this build, so its prerequisites
-# (Rust/Cargo, llvm/clang) must be installed first — see README.md.
+# Sources the SDK's scripts/env-rv1126b.sh (toolchain, sysroot, webrtc/MPP
+# env) and configures with its RV1126B CMake toolchain file. LVGL and
+# nlohmann-json are auto-discovered from a deps/ directory when present, so
+# the build never has to reach GitHub.
 # ---------------------------------------------------------------------------
-set -euo pipefail
+# Note: no `-u` — the SDK's env-rv1126b.sh probes optional unset variables.
+set -eo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-BUILD_TYPE="Release"
-SDK_DIR="${PROJECT_ROOT}/../livekit-sdk-cpp"
+SDK_DIR="${SDK_DIR:-$HOME/livekit/livekit-sdk-cpp-0.3.3}"
 DEPS_DIR=""
 DO_CLEAN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    release) BUILD_TYPE="Release"; shift ;;
-    debug)   BUILD_TYPE="Debug";   shift ;;
-    --sdk)   SDK_DIR="$2";         shift 2 ;;
-    --deps)  DEPS_DIR="$2";        shift 2 ;;
-    --clean) DO_CLEAN=1;           shift ;;
-    -h|--help)
-      grep '^#' "$0" | sed 's/^# \{0,1\}//'
-      exit 0 ;;
+    --sdk)   SDK_DIR="$2";   shift 2 ;;
+    --deps)  DEPS_DIR="$2";  shift 2 ;;
+    --clean) DO_CLEAN=1;     shift ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
 
-BUILD_DIR="${PROJECT_ROOT}/build-$(echo "${BUILD_TYPE}" | tr '[:upper:]' '[:lower:]')"
-SDK_DIR="$(cd "${SDK_DIR}" && pwd)"
+SDK_DIR="$(cd "$SDK_DIR" && pwd)"
+BUILD_DIR="$PROJECT_ROOT/build-rv1126b"
 
-[[ "${DO_CLEAN}" == "1" ]] && { echo "==> Removing ${BUILD_DIR}"; rm -rf "${BUILD_DIR}"; }
+TOOLCHAIN="$SDK_DIR/cmake/toolchains/rv1126b-aarch64-linux-gnu.cmake"
+ENV_SCRIPT="$SDK_DIR/scripts/env-rv1126b.sh"
+for f in "$TOOLCHAIN" "$ENV_SCRIPT"; do
+  [[ -f "$f" ]] || { echo "ERROR: missing $f" >&2; exit 1; }
+done
 
-# --- Build environment -----------------------------------------------------
-# Newer GCC is stricter about WebRTC's legacy headers (pulled in via the SDK).
-export CXXFLAGS="${CXXFLAGS:-} -Wno-deprecated-declarations"
-export CFLAGS="${CFLAGS:-} -Wno-deprecated-declarations"
+echo "==> LiveKit SDK : $SDK_DIR"
+echo "==> Build dir   : $BUILD_DIR"
 
-# Rust bindgen (used by the SDK's webrtc-sys crate) needs libclang.
-if [[ -z "${LIBCLANG_PATH:-}" ]]; then
-  _libclang="$(find /usr/lib /usr/lib64 -name 'libclang.so*' 2>/dev/null | head -n1 || true)"
-  [[ -n "${_libclang}" ]] && export LIBCLANG_PATH="$(dirname "${_libclang}")"
+# Cross-compile environment: toolchain, sysroot, pkg-config, webrtc, MPP.
+# shellcheck disable=SC1090
+source "$ENV_SCRIPT"
+
+# Auto-discover staged dependency sources so FetchContent never downloads
+# (the build VM cannot reliably reach GitHub). Each staged directory is
+# classified by content and mapped to the matching FETCHCONTENT_SOURCE_DIR_*.
+#   LVGL / NLOHMANN_JSON          — this project
+#   LIVEKIT_{ABSEIL,PROTOBUF,SPDLOG} — the LiveKit SDK sub-project
+declare -A FC
+classify_dep() {
+  local d="${1%/}"
+  [[ -f "$d/lvgl.h" ]] && FC[LVGL]="$d"
+  [[ -f "$d/CMakeLists.txt" && -d "$d/include/nlohmann" ]] && FC[NLOHMANN_JSON]="$d"
+  [[ -d "$d/absl" && -f "$d/CMakeLists.txt" ]] && FC[LIVEKIT_ABSEIL]="$d"
+  [[ -d "$d/src/google/protobuf" ]] && FC[LIVEKIT_PROTOBUF]="$d"
+  [[ -d "$d/include/spdlog" ]] && FC[LIVEKIT_SPDLOG]="$d"
+  return 0  # never let a failed test trip `set -e`
+}
+SCAN_DIRS=("$PROJECT_ROOT/deps" "$HOME/lk-deps" "$PROJECT_ROOT/../lk-deps")
+if [[ -n "$DEPS_DIR" ]]; then
+  SCAN_DIRS=("$DEPS_DIR" "${SCAN_DIRS[@]}")
 fi
-
-# --- Pre-staged dependencies (optional) ------------------------------------
-# Auto-discover a deps/ directory when --deps was not given, so a plain
-# `./build.sh release` still picks up staged dependencies (notably the
-# prebuilt libwebrtc — webrtc-sys downloads it from GitHub otherwise, and
-# that download is unreliable on some networks).
-if [[ -z "${DEPS_DIR}" ]]; then
-  for _cand in "${PROJECT_ROOT}/deps" "${PROJECT_ROOT}/../deps"; do
-    if [[ -d "${_cand}" ]]; then DEPS_DIR="${_cand}"; break; fi
-  done
-fi
-
+for parent in "${SCAN_DIRS[@]}"; do
+  [[ -d "$parent" ]] || continue
+  for d in "$parent"/*/; do classify_dep "$d"; done
+done
 CMAKE_DEP_ARGS=()
-if [[ -n "${DEPS_DIR}" ]]; then
-  DEPS_DIR="$(cd "${DEPS_DIR}" && pwd)"
-  echo "==> Using pre-staged dependencies from ${DEPS_DIR}"
-  _find_dep() { find "${DEPS_DIR}" -maxdepth 1 -type d -name "$1" 2>/dev/null | head -n1; }
+for k in "${!FC[@]}"; do
+  echo "==> dep $k -> ${FC[$k]}"
+  CMAKE_DEP_ARGS+=("-DFETCHCONTENT_SOURCE_DIR_$k=${FC[$k]}")
+done
 
-  _d="$(_find_dep 'spdlog-*')"
-  [[ -n "${_d}" ]] && CMAKE_DEP_ARGS+=("-DFETCHCONTENT_SOURCE_DIR_LIVEKIT_SPDLOG=${_d}")
-  _d="$(_find_dep 'SDL-*')"; [[ -z "${_d}" ]] && _d="$(_find_dep 'SDL3-*')"
-  [[ -n "${_d}" ]] && CMAKE_DEP_ARGS+=("-DFETCHCONTENT_SOURCE_DIR_SDL3=${_d}")
-  _d="$(_find_dep 'lvgl-*')"
-  [[ -n "${_d}" ]] && CMAKE_DEP_ARGS+=("-DFETCHCONTENT_SOURCE_DIR_LVGL=${_d}")
-  _d="$(_find_dep 'json')"
-  [[ -n "${_d}" ]] && CMAKE_DEP_ARGS+=("-DFETCHCONTENT_SOURCE_DIR_NLOHMANN_JSON=${_d}")
-  _d="$(_find_dep '*-release')"
-  if [[ -n "${_d}" ]]; then
-    export LK_CUSTOM_WEBRTC="${_d}"
-    echo "==> LK_CUSTOM_WEBRTC=${LK_CUSTOM_WEBRTC}"
-  fi
+if [[ "$DO_CLEAN" == "1" ]]; then
+  echo "==> Removing $BUILD_DIR"
+  rm -rf "$BUILD_DIR"
 fi
 
-echo "==> Build type : ${BUILD_TYPE}"
-echo "==> LiveKit SDK: ${SDK_DIR}"
-echo "==> Build dir  : ${BUILD_DIR}"
-echo "==> LIBCLANG   : ${LIBCLANG_PATH:-<not found>}"
-
-# --- Configure + build -----------------------------------------------------
-GEN_ARGS=()
-command -v ninja >/dev/null 2>&1 && GEN_ARGS=(-G Ninja)
-
-cmake -S "${PROJECT_ROOT}" -B "${BUILD_DIR}" \
-  "${GEN_ARGS[@]}" \
-  -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-  -DLIVEKIT_SDK_DIR="${SDK_DIR}" \
+cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" \
+  -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DLIVEKIT_SDK_DIR="$SDK_DIR" \
   "${CMAKE_DEP_ARGS[@]}"
 
-cmake --build "${BUILD_DIR}" --parallel "$(nproc)"
+cmake --build "$BUILD_DIR" --parallel "$(nproc)"
 
 echo
-echo "==> Done. Executable: ${BUILD_DIR}/bin/jusiai-assistant"
-echo "    Run it with:  cd ${BUILD_DIR}/bin && ./jusiai-assistant"
+echo "==> Done. Executable: $BUILD_DIR/bin/jusiai-assistant"
+echo "    Deploy bin/ to the board and run there."

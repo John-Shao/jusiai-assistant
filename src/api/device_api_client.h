@@ -18,7 +18,9 @@ namespace jusiai {
 class DeviceApiClient {
  public:
   // `base_url` is e.g. "https://meet.jusiai.com" (no trailing slash).
-  DeviceApiClient(std::string base_url, std::string device_api_key);
+  // `verify_tls` enables server certificate verification (needs a CA store).
+  DeviceApiClient(std::string base_url, std::string device_api_key,
+                  bool verify_tls);
 
   // Create an anonymous 1v1 AI room. On success fills `out` with the LiveKit
   // connection info needed to join.
@@ -44,6 +46,7 @@ class DeviceApiClient {
 
   std::string base_url_;
   std::string auth_header_;  // "Bearer <device_api_key>"
+  bool verify_tls_;
 };
 
 }  // namespace jusiai
