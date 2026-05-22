@@ -61,11 +61,15 @@ class AssistantController {
   // Stop the conversation (if any), worker thread and media engines.
   void shutdown();
 
-  // UI commands — non-blocking, handled on the worker thread.
+  // UI / control commands — non-blocking, handled on the worker thread.
   void request_start();
   void request_stop();
   void request_toggle_mute();
   void request_toggle_camera();
+  // Explicit (idempotent) variants for the remote control API, which knows the
+  // desired state rather than just wanting a flip.
+  void request_set_mic_muted(bool muted);
+  void request_set_camera_muted(bool muted);
 
   // Thread-safe snapshot for rendering.
   UiSnapshot snapshot() const;
@@ -79,6 +83,8 @@ class AssistantController {
     CmdStop,
     CmdToggleMute,
     CmdToggleCamera,
+    CmdSetMute,
+    CmdSetCamera,
     CmdQuit,
     EvAgentOnline,
     EvAgentOffline,
@@ -87,10 +93,11 @@ class AssistantController {
   struct Event {
     EventType type;
     std::string text;
+    bool flag = false;  // payload for CmdSetMute / CmdSetCamera
   };
 
   void worker_loop();
-  void post(EventType type, std::string text = {});
+  void post(EventType type, std::string text = {}, bool flag = false);
   void handle(const Event& ev);
 
   // Closed-loop steps (worker thread only).

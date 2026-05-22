@@ -88,6 +88,46 @@ cd /opt/jusiai && ./run.sh --autostart     # 启动即自动发起 AI 通话（k
 
 退出：`Ctrl-C` 或 `kill -INT`。
 
+### 5.1 无屏设备（headless）运行与控制 API
+
+无屏设备加 `--headless`：跳过 LVGL/framebuffer/触摸 UI（无 `/dev/fb0` 时本来也起
+不来），只跑 AI 闭环。此时设备通过**本地 HTTP 控制 API** 操控 —— 由同设备上的语音
+模块、手机命令模块调用；那两个模块各自负责语音识别和手机协议，jusiai-assistant
+只对外提供自身功能的控制接口。
+
+```bash
+cd /opt/jusiai && ./run.sh --headless              # 等待控制 API 指令
+cd /opt/jusiai && ./run.sh --headless --autostart  # 启动即发起 AI 通话
+```
+
+`--headless` 时若未指定 `--control-port`，自动用默认端口 **8765**（无屏设备必须可
+控）。控制 API 默认只绑 `127.0.0.1`（调用方是本机的兄弟模块）。带屏设备也可设
+`control_port` 开启同一套 API，触摸与 API 并存。
+
+| 方法 / 路径 | 作用 | 参数 |
+|------------|------|------|
+| `POST /start`   | 发起 AI 通话 | — |
+| `POST /stop`    | 结束 AI 通话 | — |
+| `POST /mic`     | 麦克风静音开关 | `muted`（true/false）|
+| `POST /camera`  | 摄像头开关 | `enabled`（true/false）|
+| `GET /status`   | 当前状态（JSON）| — |
+| `GET /events`   | 状态变化推送（SSE）| — |
+| `GET /healthz`  | 存活探测 | — |
+
+`POST /mic`、`POST /camera` 的参数可走 URL query（`?muted=true`）或 JSON body
+（`{"muted":true}`）。`/status` 与 `/events` 的状态字段：
+
+| 字段 | 说明 |
+|------|------|
+| `state` | 机器可读状态：`idle` / `creating_room` / `connecting` / `waiting_agent` / `in_call` / `stopping` / `error` |
+| `status` / `detail` | 人类可读文案（随 `language` 本地化，供显示用）|
+| `mic_muted` / `camera_muted` | 麦克风 / 摄像头当前是否关闭 |
+| `agent_speaking` | AI 当前是否在说话 |
+| `camera_available` | 摄像头是否可用 |
+
+`GET /events` 是 Server-Sent Events 长连接：连上即先收到一次当前状态，之后每次状态
+变化推送一条 `event: status` 帧（data 为上面的 JSON），另每 10 s 一次保活帧。
+
 ## 6. 配置
 
 优先级（后者覆盖前者）：内置默认值 → 配置文件 → `JUSIAI_*` 环境变量 → 命令行参数。
@@ -106,9 +146,14 @@ cd /opt/jusiai && ./run.sh --autostart     # 启动即自动发起 AI 通话（k
 | `camera_rotation` | 摄像头顺时针旋转角（传感器物理装配补偿）| `90` |
 | `camera_device` | V4L2 摄像头节点 | `/dev/video-camera0` |
 | `audio_mic_gain` | 麦克风软件增益（编解码器 PGA 已足够，默认不额外加）| `1.0` |
+| `audio_aec` / `--no-aec` | 回声消除（扬声器与麦克风共用全双工编解码器，默认开，见 §8.5）| `true` |
+| `audio_aec_delay_ms` / `--aec-delay` | 回声消除的扬声器→麦克风延迟估计（ms）| `90` |
 | `autostart` / `--autostart` | 启动即发起通话 | `false` |
 | `fullscreen` | 占满面板 | `true` |
 | `language` / `--language` | 界面语言：`zh`（简体中文）/ `en` | `zh` |
+| `headless` / `--headless` | 无屏模式：跳过显示 UI，仅靠控制 API 操控（见 §5.1）| `false` |
+| `control_port` / `--control-port` | 本地控制 API 端口（`0` 关闭；headless 时默认 `8765`）| `0` |
+| `control_bind` / `--control-bind` | 控制 API 绑定地址 | `127.0.0.1` |
 
 TLS：板上 Buildroot rootfs 无系统 CA 库，应用启动时会自动把 `SSL_CERT_FILE`
 指向与可执行文件同目录的 `ca-certificates.crt`（OpenSSL 与 LiveKit SDK 内的
@@ -199,6 +244,24 @@ LiveKit `AudioSource` 在 `queue_size_ms = 0`（实时直采模式）下，`capt
 aarch64-buildroot-linux-gnu-gcc -O2 tools/alsadiag.c -lasound -lm -o alsadiag
 ```
 
+### 8.5 回声消除
+
+扬声器和麦克风是同一块全双工 ES8389（见 §8.2），麦克风必然录到正在外放的 AI
+语音 —— 不消回声的话 AI 会听到自己、自问自答。
+
+本移植版把 WebRTC 的音频设备模块换成了自定义 ALSA 收发，于是 WebRTC 自带的自动
+AEC 被绕过了；应用改为**显式**调用 LiveKit SDK 的 `AudioProcessingModule`
+（WebRTC APM，含 AEC3）。接入点在 `src/media/audio_io.cpp`：
+
+- 播放写线程在 `snd_pcm_writei` 前，把**即将外放的那一帧 10 ms 音频**下混成单声道
+  喂给 `processReverseStream()` 作回声参考；
+- 采集线程把麦克风 10 ms 帧喂给 `processStream()` 原地消回声，再上送给 SDK。
+
+两条路径本来就以 10 ms 为粒度（SDK 直采也要求严格 10 ms 帧），与 APM 要求一致。
+开关为配置项 `audio_aec`（默认开），`audio_aec_delay_ms` 是扬声器→麦克风回环延迟
+的初始估计（默认 90 ms，AEC3 会自适应，板上若有残留回声可调）。同时启用了降噪与
+高通滤波；AGC 关闭（ES8389 的 PGA 已设定电平，开 AGC 会与之相互打架）。
+
 ## 9. 界面语言（中文 / 英文）
 
 界面默认**简体中文**，也支持英文，由配置项 `language`（`zh` / `en`）切换。
@@ -242,5 +305,6 @@ jusiai-assistant/
     ├── rtc/livekit_session.*  LiveKit 会话封装
     ├── media/              V4L2 摄像头、ALSA 音频、帧缓冲
     ├── core/               闭环状态机
+    ├── control/            无屏设备的本地 HTTP 控制 + 状态 API
     └── ui/                 LVGL framebuffer/evdev 驱动 + 主界面
 ```

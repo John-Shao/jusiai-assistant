@@ -155,6 +155,9 @@ class AlsaCapture {
 // ===========================================================================
 class AlsaPlayback {
  public:
+  // `apm`, when set, is fed the reference signal for echo cancellation.
+  explicit AlsaPlayback(std::shared_ptr<livekit::AudioProcessingModule> apm)
+      : apm_(std::move(apm)) {}
   ~AlsaPlayback() { stop(); }
 
   bool ensure_open(int hw_rate) {
@@ -291,6 +294,23 @@ class AlsaPlayback {
       // Pad with silence so the PCM never underruns (avoids pops).
       std::fill(chunk.begin() + got, chunk.end(), 0);
 
+      // Hand the echo canceller the reference signal — exactly this 10 ms
+      // frame about to be rendered, down-mixed to mono (the stereo ring holds
+      // L==R). Done before writei so the reference leads the captured echo.
+      if (apm_) {
+        std::vector<std::int16_t> ref(static_cast<std::size_t>(frames));
+        for (int i = 0; i < frames; ++i) ref[i] = chunk[2 * i];
+        try {
+          livekit::AudioFrame rf(std::move(ref), hw_rate_, 1, frames);
+          apm_->processReverseStream(rf);
+        } catch (const std::exception& e) {
+          if (!apm_warned_) {
+            LOG_WARN("audio: APM reverse-stream failed: %s", e.what());
+            apm_warned_ = true;
+          }
+        }
+      }
+
       snd_pcm_sframes_t w = snd_pcm_writei(pcm_, chunk.data(), frames);
       if (w < 0) snd_pcm_recover(pcm_, static_cast<int>(w), /*silent=*/1);
     }
@@ -303,6 +323,9 @@ class AlsaPlayback {
   std::mutex ring_mutex_;
   std::deque<std::int16_t> ring_;  // interleaved stereo
 
+  std::shared_ptr<livekit::AudioProcessingModule> apm_;  // echo-cancel reference
+  bool apm_warned_ = false;        // writer thread only — one-shot error log
+
   std::atomic<bool> stop_{false};
   std::thread writer_;
 };
@@ -310,12 +333,39 @@ class AlsaPlayback {
 // ===========================================================================
 // AudioEngine
 // ===========================================================================
-AudioEngine::AudioEngine(int sample_rate, int channels, float mic_gain)
+AudioEngine::AudioEngine(int sample_rate, int channels, float mic_gain,
+                         bool aec, int aec_delay_ms)
     : sample_rate_(sample_rate),
       channels_(channels),
       mic_gain_(mic_gain > 0.0f ? mic_gain : 1.0f) {
   audio_source_ =
       std::make_shared<livekit::AudioSource>(sample_rate_, channels_, 0);
+
+  if (!aec) {
+    LOG_INFO("audio: echo cancellation disabled by config");
+    return;
+  }
+  // The speaker and microphone are the one ES8389 codec, so the mic captures
+  // the agent's own playback. The WebRTC APM cancels it; the playback writer
+  // thread feeds it the reference and the capture thread the near-end signal.
+  try {
+    livekit::AudioProcessingModule::Options opt;
+    opt.echo_cancellation = true;   // AEC3 — stops the agent talking to itself
+    opt.noise_suppression = true;   // far-field mic also picks up room noise
+    opt.high_pass_filter = true;    // drop DC offset / low-frequency rumble
+    opt.auto_gain_control = false;  // ES8389 PGA already sets the level
+    apm_ = std::make_shared<livekit::AudioProcessingModule>(opt);
+    // Echo processing needs a delay estimate; the fixed full-duplex ALSA
+    // geometry keeps it roughly constant, so set the hint once.
+    apm_->setStreamDelayMs(aec_delay_ms > 0 ? aec_delay_ms : 0);
+    LOG_INFO("audio: echo cancellation enabled (delay hint %d ms)",
+             aec_delay_ms);
+  } catch (const std::exception& e) {
+    LOG_ERROR("audio: could not create the echo canceller: %s — "
+              "continuing without AEC",
+              e.what());
+    apm_.reset();
+  }
 }
 
 AudioEngine::~AudioEngine() {
@@ -390,9 +440,22 @@ void AudioEngine::mic_loop() {
       level_peak = 0;
       level_frames = 0;
     }
+    livekit::AudioFrame frame_obj(std::move(data), sample_rate_, channels_,
+                                  got);
+    // Echo cancellation — removes the agent's own playback from the mic
+    // signal, in-place, before it is sent upstream.
+    if (apm_) {
+      try {
+        apm_->processStream(frame_obj);
+      } catch (const std::exception& e) {
+        static bool warned = false;
+        if (!warned) {
+          LOG_WARN("audio: APM stream processing failed: %s", e.what());
+          warned = true;
+        }
+      }
+    }
     try {
-      livekit::AudioFrame frame_obj(std::move(data), sample_rate_, channels_,
-                                    got);
       audio_source_->captureFrame(frame_obj, 100);
     } catch (const std::exception& e) {
       LOG_DEBUG("audio: captureFrame dropped a frame: %s", e.what());
@@ -404,7 +467,7 @@ void AudioEngine::play_agent_audio(const std::int16_t* samples,
                                    int samples_per_channel, int sample_rate,
                                    int channels) {
   if (!samples || samples_per_channel <= 0) return;
-  if (!playback_) playback_ = std::make_unique<AlsaPlayback>();
+  if (!playback_) playback_ = std::make_unique<AlsaPlayback>(apm_);
   // Open the speaker PCM at the capture hardware rate so its hw_params match
   // the running microphone stream — mandatory on this full-duplex codec.
   if (!playback_->ensure_open(sample_rate_)) return;

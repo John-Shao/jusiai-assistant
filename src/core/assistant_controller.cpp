@@ -14,7 +14,8 @@ AssistantController::AssistantController(const AppConfig& config)
     : config_(config),
       api_(config.base_url, config.device_api_key, config.tls_verify),
       audio_(config.audio_sample_rate, config.audio_channels,
-             config.audio_mic_gain),
+             config.audio_mic_gain, config.audio_aec,
+             config.audio_aec_delay_ms),
       camera_(config.camera_width, config.camera_height, config.camera_fps,
               config.camera_rotation, config.camera_device, &preview_) {}
 
@@ -55,6 +56,12 @@ void AssistantController::request_toggle_mute() {
 void AssistantController::request_toggle_camera() {
   post(EventType::CmdToggleCamera);
 }
+void AssistantController::request_set_mic_muted(bool muted) {
+  post(EventType::CmdSetMute, {}, muted);
+}
+void AssistantController::request_set_camera_muted(bool muted) {
+  post(EventType::CmdSetCamera, {}, muted);
+}
 
 UiSnapshot AssistantController::snapshot() const {
   UiSnapshot s;
@@ -73,10 +80,10 @@ UiSnapshot AssistantController::snapshot() const {
 
 // --- Worker thread -------------------------------------------------------
 
-void AssistantController::post(EventType type, std::string text) {
+void AssistantController::post(EventType type, std::string text, bool flag) {
   {
     std::lock_guard<std::mutex> lock(queue_mutex_);
-    queue_.push_back(Event{type, std::move(text)});
+    queue_.push_back(Event{type, std::move(text), flag});
   }
   queue_cv_.notify_one();
 }
@@ -148,6 +155,18 @@ void AssistantController::handle(const Event& ev) {
       LOG_INFO("controller: camera %s", new_muted ? "off" : "on");
       break;
     }
+
+    case EventType::CmdSetMute:
+      mic_muted_.store(ev.flag);
+      if (session_) session_->set_mic_muted(ev.flag);
+      LOG_INFO("controller: microphone %s", ev.flag ? "muted" : "live");
+      break;
+
+    case EventType::CmdSetCamera:
+      cam_muted_.store(ev.flag);
+      if (session_) session_->set_camera_muted(ev.flag);
+      LOG_INFO("controller: camera %s", ev.flag ? "off" : "on");
+      break;
 
     case EventType::EvAgentOnline:
       if (state == AssistantState::WaitingAgent) {
