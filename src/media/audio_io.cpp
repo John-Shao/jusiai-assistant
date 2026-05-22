@@ -405,7 +405,8 @@ void AudioEngine::mic_loop() {
   const int frame = sample_rate_ / 100;  // 10 ms
   std::vector<std::int16_t> buf(static_cast<std::size_t>(frame) * channels_);
 
-  int level_peak = 0;    // diagnostics: post-gain peak amplitude
+  int level_peak_in = 0;   // diagnostics: peak mic amplitude before AEC
+  int level_peak_out = 0;  // diagnostics: peak mic amplitude after AEC
   int level_frames = 0;
 
   while (mic_running_.load()) {
@@ -428,18 +429,12 @@ void AudioEngine::mic_loop() {
                                                  : (v > 32767 ? 32767 : v));
       }
     }
-    // Periodic capture-level log: lets a tester confirm the mic picks up
-    // speech (peak jumps) vs. a dead/too-quiet input (peak stays near 0).
+    // Pre-AEC peak — the raw mic level (what would be sent without AEC).
     for (std::int16_t s : data) {
       int a = s < 0 ? -static_cast<int>(s) : s;
-      if (a > level_peak) level_peak = a;
+      if (a > level_peak_in) level_peak_in = a;
     }
-    if (++level_frames >= 200) {  // ~2 s of 10 ms frames
-      LOG_INFO("audio: mic peak=%d/32767 (gain %.1fx)", level_peak,
-               static_cast<double>(mic_gain_));
-      level_peak = 0;
-      level_frames = 0;
-    }
+
     livekit::AudioFrame frame_obj(std::move(data), sample_rate_, channels_,
                                   got);
     // Echo cancellation — removes the agent's own playback from the mic
@@ -455,6 +450,22 @@ void AudioEngine::mic_loop() {
         }
       }
     }
+
+    // Post-AEC peak — what is actually sent upstream. While the agent speaks
+    // and no one else does, the gap below the pre-AEC peak is the cancelled
+    // echo (in == out when AEC is disabled).
+    for (std::int16_t s : frame_obj.data()) {
+      int a = s < 0 ? -static_cast<int>(s) : s;
+      if (a > level_peak_out) level_peak_out = a;
+    }
+    if (++level_frames >= 200) {  // ~2 s of 10 ms frames
+      LOG_INFO("audio: mic peak in=%d out=%d /32767 (gain %.1fx)",
+               level_peak_in, level_peak_out, static_cast<double>(mic_gain_));
+      level_peak_in = 0;
+      level_peak_out = 0;
+      level_frames = 0;
+    }
+
     try {
       audio_source_->captureFrame(frame_obj, 100);
     } catch (const std::exception& e) {
