@@ -111,7 +111,7 @@ cd /opt/jusiai && ./run.sh --headless --autostart  # 启动即发起 AI 通话
 | `POST /mic`     | 麦克风静音开关 | `muted`（true/false）|
 | `POST /camera`  | 摄像头开关 | `enabled`（true/false）|
 | `GET /status`   | 当前状态（JSON）| — |
-| `GET /events`   | 状态变化推送（SSE）| — |
+| `GET /events`   | 状态变化推送（SSE, Server-Sent Events）| — |
 | `GET /healthz`  | 存活探测 | — |
 
 `POST /mic`、`POST /camera` 的参数可走 URL query（`?muted=true`）或 JSON body
@@ -127,6 +127,143 @@ cd /opt/jusiai && ./run.sh --headless --autostart  # 启动即发起 AI 通话
 
 `GET /events` 是 Server-Sent Events 长连接：连上即先收到一次当前状态，之后每次状态
 变化推送一条 `event: status` 帧（data 为上面的 JSON），另每 10 s 一次保活帧。
+
+### 5.2 手机直连操控
+
+手机直接连 API 操控。接口与状态字段同 §5.1（无状态 HTTP，每条命令一个请求），差别只在
+**绑定地址**这一点。
+
+**让 API 可被直连。** 控制 API 默认只绑 `127.0.0.1`，手机连不上 —— 直连场景必须让
+它监听局域网地址：
+
+| 方式 | 设置 |
+|------|------|
+| 命令行 | `./run.sh --headless --control-bind 0.0.0.0` |
+| 配置文件 | `control_bind = 0.0.0.0`、`control_port = 8765` |
+| 环境变量 | `JUSIAI_CONTROL_BIND=0.0.0.0` |
+
+启动日志会打印 `control: HTTP control API listening on 0.0.0.0:8765`。手机
+的访问地址即 `http://<设备局域网IP>:8765`；设备 IP 需自行获知（静态 IP / 路由器
+DHCP 绑定 / 手动输入，程序未内置 mDNS 发现）。
+
+**完整 curl 示例**（各接口、状态字段的含义见 §5.1）：
+
+```bash
+DEV=http://192.168.10.241:8765      # 改成设备实际 IP
+
+curl -s $DEV/healthz                                  # 探活：设备/控制 API 就绪
+curl -s $DEV/status                                   # 查当前状态
+curl -s -X POST $DEV/start                            # 发起 AI 通话
+curl -sN $DEV/events                                  # 订阅状态变化（SSE 长连接）
+curl -s -X POST "$DEV/mic?muted=true"                 # 麦克风静音（query 传参）
+curl -s -X POST $DEV/mic -H 'Content-Type: application/json' \
+     -d '{"muted":false}'                             # 取消静音（JSON body 传参）
+curl -s -X POST "$DEV/camera?enabled=false"           # 关摄像头
+curl -s -X POST $DEV/stop                             # 挂断
+```
+
+成功返回 `{"ok":true}`；`/mic`、`/camera` 缺参数返回 `HTTP 400` +
+`{"ok":false,"error":"..."}`。一次完整通话（可直接当冒烟测试）：
+
+```bash
+DEV=http://192.168.10.241:8765
+curl -s $DEV/healthz                                          # 设备在线？
+curl -s -X POST $DEV/start                                    # 发起
+until curl -s $DEV/status | grep -q '"state":"in_call"'; do sleep 1; done
+curl -s -X POST "$DEV/mic?muted=true"                         # 通话中静音
+curl -s -X POST "$DEV/mic?muted=false"                        # 取消静音
+curl -s -X POST $DEV/stop                                     # 挂断
+```
+
+**典型接入流程：**
+
+1. 进入界面：`GET /healthz` 判断设备可达，并发起一条 `GET /events` 长连接，UI 全靠
+   它刷新（连上即收到当前状态）。
+2. 用户按「呼叫」：`POST /start`，界面随 SSE 从 `connecting` 过渡到 `in_call`。
+3. 通话中：静音键 → `POST /mic`，摄像头键 → `POST /camera`；按钮选中态由 SSE 推来的
+   `mic_muted` / `camera_muted` 回填，`agent_speaking` 驱动「AI 说话中」指示。
+4. 用户按「挂断」：`POST /stop`，SSE 回到 `idle`。
+5. 遇到 `error` 状态：用 `detail` 提示用户，「重试」即再发一次 `POST /start`。
+
+若手机不便维持 SSE 长连接，可改用每 1~2 s 轮询 `GET /status`。
+
+> **安全提示**：控制 API **当前无鉴权** —— 绑到 `0.0.0.0` 后，同一局域网内任何人都
+> 能操控设备。仅适用于可信家庭网络；产品化建议加预共享令牌校验
+> （`Authorization: Bearer …`，与设备 API 的 `device_api_key` 同思路）。
+
+### 5.3 手机端接收 SSE 状态推送
+
+`GET /events` 是一条**不关闭的 HTTP GET**：手机发起请求后，服务端持续在该连接上推送
+文本帧，格式为：
+
+```
+event: status
+data: {"state":"in_call","mic_muted":false,...}
+
+```
+
+手机端读取该流、按空行切分、取 `data:` 行解析 JSON 即可。
+
+**三个必须注意的点：**
+
+1. **事件名是 `status`，不是 `message`** —— 服务端发的是具名事件（`event: status`）。
+   Web 端必须 `addEventListener('status', …)`，用 `onmessage` 收不到；原生 SSE 库的
+   `onEvent` 回调会带上 type，不受影响。
+2. **明文 HTTP 要放行** —— API 是 `http://`（非 https）：Android 9+ 在
+   `AndroidManifest.xml` 的 `<application>` 加 `android:usesCleartextTraffic="true"`
+   （或用 network-security-config 只放行设备网段）；iOS 在 `Info.plist` 的
+   `NSAppTransportSecurity` 加 `NSAllowsLocalNetworking = true`。
+3. **要自己重连** —— 设备重启 / WiFi 抖动会断流。服务端每 10 s 推一帧保活，可借此
+   判断连接是否还活着。
+
+**Android（Kotlin + OkHttp SSE）：**
+
+```kotlin
+// build.gradle: implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
+val client = OkHttpClient.Builder()
+    .readTimeout(0, TimeUnit.MILLISECONDS)   // 0=不超时，SSE 是长连接
+    .build()
+val request = Request.Builder().url("http://192.168.10.241:8765/events").build()
+
+val listener = object : EventSourceListener() {
+    override fun onEvent(es: EventSource, id: String?, type: String?, data: String) {
+        val s = JSONObject(data)             // type=="status"，data 是状态 JSON
+        runOnUiThread { updateUi(s.getString("state"), s.getBoolean("mic_muted")) }
+    }
+    override fun onFailure(es: EventSource, t: Throwable?, resp: Response?) {
+        // 断线：延迟 2~5 s 后重新 newEventSource() 重连
+    }
+}
+EventSources.createFactory(client).newEventSource(request, listener)
+```
+
+`readTimeout(0)` 是关键，否则 OkHttp 会掐掉「空闲」的长连接。
+
+**iOS（Swift）：** 最省事用成熟库 swift-eventsource（自带重连）：
+
+```swift
+var cfg = EventSource.Config(handler: myHandler,
+            url: URL(string: "http://192.168.10.241:8765/events")!)
+EventSource(config: cfg).start()
+// MessageHandler.onMessage(eventType: "status", messageEvent:) → messageEvent.data 是 JSON
+```
+
+不想加依赖，可用 `URLSession` + `URLSessionDataDelegate`：必须用 delegate 版的
+`dataTask`（completion-handler 版会把整个响应缓冲到结束才回调），在
+`urlSession(_:dataTask:didReceive:)` 里把到达的分片拼进缓冲、按 `\n\n` 切块、取
+`data:` 行解析。
+
+**Web / WebView（手机 UI 为网页时）：** 浏览器原生支持且自动重连：
+
+```js
+const es = new EventSource('http://192.168.10.241:8765/events');
+es.addEventListener('status', e => {        // 注意：不是 onmessage
+  const s = JSON.parse(e.data);
+  updateUi(s.state, s.mic_muted, s.agent_speaking);
+});
+```
+
+**生命周期：** SSE 连接随界面打开建立、整个会话保持；App 切后台时关闭、回前台再重连。
 
 ## 6. 配置
 
