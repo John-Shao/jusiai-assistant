@@ -78,8 +78,11 @@ struct AppConfig {
 // `exit_code` carries the process exit status the caller should use.
 AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code);
 
-// Return a stable device id, generating and persisting one under
-// ~/.config/jusiai-assistant/device_id when `configured` is empty.
+// Return a stable device id. When `configured` is empty, derive one from
+// the SoC eFuse serial (via /proc/cpuinfo "Serial") as `JUSI-<serial>` —
+// the on-die value survives rootfs / storage / U-Boot resets. If no such
+// serial exists (desktop / x86 dev), fall back to a random id persisted
+// under ~/.config/jusiai-assistant/device_id.
 std::string resolve_device_id(const std::string& configured);
 
 }  // namespace jusiai

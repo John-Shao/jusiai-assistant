@@ -215,6 +215,29 @@ std::string AppConfig::summary() const {
 std::string resolve_device_id(const std::string& configured) {
   if (!configured.empty()) return configured;
 
+  // Prefer the SoC eFuse serial exposed via /proc/cpuinfo. It lives in
+  // on-die OTP so it survives rootfs / storage / U-Boot resets — only a
+  // board-level SoC replacement changes it. 64-bit Rockchip chip IDs are
+  // globally unique per chip, so `JUSI-<serial>` is already unique without
+  // any product-line prefix.
+  {
+    std::ifstream cpuinfo("/proc/cpuinfo");
+    std::string line;
+    while (std::getline(cpuinfo, line)) {
+      if (line.compare(0, 6, "Serial") != 0) continue;
+      auto colon = line.find(':');
+      if (colon == std::string::npos) continue;
+      std::string serial = trim(line.substr(colon + 1));
+      if (!serial.empty()) {
+        std::string id = "JUSI-" + serial;
+        LOG_INFO("config: device_id from SoC serial: %s", id.c_str());
+        return id;
+      }
+    }
+  }
+
+  // Fallback (desktop / x86 dev with no SoC serial): generate a random id
+  // once and persist it. Note this ID does NOT survive a rootfs wipe.
   fs::path id_path = config_root() / "device_id";
   std::error_code ec;
 
