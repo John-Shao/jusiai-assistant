@@ -84,16 +84,26 @@ ApiOutcome DeviceApiClient::post_json(const std::string& path,
                              extract_error_message(res->body, res->status));
 }
 
-ApiOutcome DeviceApiClient::create_room(const std::string& device_id,
-                                        const std::string& room_name,
-                                        RoomCredentials& out) {
+ApiOutcome DeviceApiClient::connect_room(const std::string& device_id,
+                                         const std::string& room_name,
+                                         const std::string& provider,
+                                         const std::string& voice,
+                                         const std::string& prompt_label,
+                                         RoomCredentials& out) {
   out = RoomCredentials{};
 
   json req = {{"device_id", device_id}};
   if (!room_name.empty()) req["name"] = room_name;
+  if (!provider.empty()) req["provider"] = provider;
+
+  json config = json::object();
+  if (!voice.empty()) config["voice"] = voice;
+  if (!prompt_label.empty()) config["prompt_label"] = prompt_label;
+  if (!config.empty()) req["config"] = config;
 
   std::string body;
-  ApiOutcome outcome = post_json("/device-api/v1.0/rooms/", req.dump(), body);
+  ApiOutcome outcome =
+      post_json("/device-api/v1.0/rooms/connect/", req.dump(), body);
   if (!outcome.ok) return outcome;
 
   try {
@@ -106,39 +116,17 @@ ApiOutcome DeviceApiClient::create_room(const std::string& device_id,
       out.livekit_token = lk.value("token", "");
     }
   } catch (const std::exception& e) {
-    return ApiOutcome::failure(outcome.http_status,
-                               std::string("Bad room response: ") + e.what());
+    return ApiOutcome::failure(
+        outcome.http_status, std::string("Bad connect response: ") + e.what());
   }
 
   if (!out.valid()) {
     return ApiOutcome::failure(outcome.http_status,
                                "Incomplete room info from the server");
   }
-  LOG_INFO("device-api: room created id=%s slug=%s", out.room_id.c_str(),
-           out.slug.c_str());
-  return outcome;
-}
-
-ApiOutcome DeviceApiClient::start_ai_agent(const std::string& room_id,
-                                           const std::string& device_id,
-                                           const std::string& provider,
-                                           const std::string& voice,
-                                           const std::string& prompt_label) {
-  json config = json::object();
-  if (!voice.empty()) config["voice"] = voice;
-  if (!prompt_label.empty()) config["prompt_label"] = prompt_label;
-
-  json req = {{"device_id", device_id}};
-  if (!provider.empty()) req["provider"] = provider;
-  if (!config.empty()) req["config"] = config;
-
-  std::string body;
-  ApiOutcome outcome = post_json(
-      "/device-api/v1.0/rooms/" + room_id + "/start-ai-agent/", req.dump(),
-      body);
-  if (outcome.ok) {
-    LOG_INFO("device-api: AI agent dispatched (provider=%s)", provider.c_str());
-  }
+  LOG_INFO("device-api: connected room id=%s slug=%s (provider=%s)",
+           out.room_id.c_str(), out.slug.c_str(),
+           provider.empty() ? "default" : provider.c_str());
   return outcome;
 }
 

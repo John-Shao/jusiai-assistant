@@ -27,12 +27,17 @@ RV1126B 无 3D GPU，平台层从 SDL3 全部换成板原生接口：
 
 ## 2. 闭环流程
 
-与 Android 端「AI 助手」一致，全程走设备 API（`DEVICE_API_KEY` 鉴权）：
+全程走设备 API（`DEVICE_API_KEY` 鉴权）。接入 1v1 用**单次 `connect` 接口**
+（`POST /device-api/v1.0/rooms/connect/`）：一次调用即完成「建房 + 签发 LiveKit
+凭据 + 唤起 AI 助手」，房间对客户端透明：
 
 ```
-创建匿名房间  → 连接 LiveKit → 发布麦克风 + 摄像头
-            → 唤起 AI 助手 → 订阅 AI 音频播放 → 挂断（停止 AI + 断开）
+connect（建房 + 唤起 AI 助手） → 连接 LiveKit → 发布麦克风 + 摄像头
+            → 等待 AI 加入 → 订阅 AI 音频播放 → 挂断（停止 AI + 断开）
 ```
+
+> `connect` 是幂等的：一个房间内最多只有一个 AI 助手，断线重连可安全再次调用。
+> AI 助手在房间清空后会自动退出，挂断时的停止调用为尽力而为。
 
 ## 3. 构建环境
 
