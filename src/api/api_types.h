@@ -5,9 +5,9 @@
 
 namespace jusiai {
 
-// LiveKit connection info returned by POST /device-api/v1.0/rooms/.
+// LiveKit connection info returned by POST /device-api/v1.0/rooms/connect/.
 struct RoomCredentials {
-  std::string room_id;        // room UUID — the {id} for start/stop-ai-agent
+  std::string room_id;        // room UUID — the {id} for stop-ai-agent
   std::string slug;           // 6-digit meeting code
   std::string livekit_url;    // LiveKit server WebSocket URL
   std::string livekit_token;  // join token, identity = device-<device_id>

@@ -14,7 +14,8 @@ AssistantController::AssistantController(const AppConfig& config)
     : config_(config),
       api_(config.base_url, config.device_api_key, config.tls_verify),
       audio_(config.audio_sample_rate, config.audio_channels,
-             config.audio_mic_gain),
+             config.audio_mic_gain, config.audio_aec,
+             config.audio_aec_delay_ms),
       camera_(config.camera_width, config.camera_height, config.camera_fps,
               config.camera_rotation, config.camera_device, &preview_) {}
 
@@ -55,6 +56,12 @@ void AssistantController::request_toggle_mute() {
 void AssistantController::request_toggle_camera() {
   post(EventType::CmdToggleCamera);
 }
+void AssistantController::request_set_mic_muted(bool muted) {
+  post(EventType::CmdSetMute, {}, muted);
+}
+void AssistantController::request_set_camera_muted(bool muted) {
+  post(EventType::CmdSetCamera, {}, muted);
+}
 
 UiSnapshot AssistantController::snapshot() const {
   UiSnapshot s;
@@ -73,10 +80,10 @@ UiSnapshot AssistantController::snapshot() const {
 
 // --- Worker thread -------------------------------------------------------
 
-void AssistantController::post(EventType type, std::string text) {
+void AssistantController::post(EventType type, std::string text, bool flag) {
   {
     std::lock_guard<std::mutex> lock(queue_mutex_);
-    queue_.push_back(Event{type, std::move(text)});
+    queue_.push_back(Event{type, std::move(text), flag});
   }
   queue_cv_.notify_one();
 }
@@ -149,6 +156,18 @@ void AssistantController::handle(const Event& ev) {
       break;
     }
 
+    case EventType::CmdSetMute:
+      mic_muted_.store(ev.flag);
+      if (session_) session_->set_mic_muted(ev.flag);
+      LOG_INFO("controller: microphone %s", ev.flag ? "muted" : "live");
+      break;
+
+    case EventType::CmdSetCamera:
+      cam_muted_.store(ev.flag);
+      if (session_) session_->set_camera_muted(ev.flag);
+      LOG_INFO("controller: camera %s", ev.flag ? "off" : "on");
+      break;
+
     case EventType::EvAgentOnline:
       if (state == AssistantState::WaitingAgent) {
         set_state(AssistantState::InCall, tr(Msg::StatusListening));
@@ -180,12 +199,15 @@ void AssistantController::handle(const Event& ev) {
 // --- Closed-loop steps ---------------------------------------------------
 
 void AssistantController::do_start() {
-  // 1. Create an anonymous 1v1 AI room via the device API.
+  // 1. Set up the 1v1 AI session in one call: the device API get-or-creates the
+  //    room, returns LiveKit credentials, and dispatches the AI agent.
   set_state(AssistantState::CreatingRoom, tr(Msg::StatusCreatingRoom), {});
   RoomCredentials creds;
-  LOG_INFO("controller: calling device-api create_room ...");
-  ApiOutcome o = api_.create_room(config_.device_id, config_.room_name, creds);
-  LOG_INFO("controller: create_room -> ok=%d http=%d %s", o.ok, o.http_status,
+  LOG_INFO("controller: calling device-api connect_room ...");
+  ApiOutcome o = api_.connect_room(config_.device_id, config_.room_name,
+                                   config_.provider, config_.voice,
+                                   config_.prompt_label, creds);
+  LOG_INFO("controller: connect_room -> ok=%d http=%d %s", o.ok, o.http_status,
            o.error.c_str());
   if (!o.ok) {
     teardown(AssistantState::Error, tr(Msg::ErrCreateRoom), o.error);
@@ -238,17 +260,10 @@ void AssistantController::do_start() {
     }
   }
 
-  // 4. Dispatch the AI agent into the room.
+  // 4. The AI agent was already dispatched by connect_room (step 1); it joins
+  //    the room and waits for this device participant. Wait for it to come
+  //    online, up to the deadline the worker loop enforces.
   set_state(AssistantState::WaitingAgent, tr(Msg::StatusWakingAgent));
-  ApiOutcome a = api_.start_ai_agent(room_id_, config_.device_id,
-                                     config_.provider, config_.voice,
-                                     config_.prompt_label);
-  if (!a.ok) {
-    teardown(AssistantState::Error, tr(Msg::ErrStartAgent), a.error);
-    return;
-  }
-
-  // The worker loop now waits for EvAgentOnline up to this deadline.
   agent_deadline_ = std::chrono::steady_clock::now() + kAgentJoinTimeout;
   LOG_INFO("controller: waiting for the AI agent to join");
 }

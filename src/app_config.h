@@ -38,6 +38,13 @@ struct AppConfig {
   // Extra software gain on the mic. The ES8389 codec setup (alsa_setup.c)
   // already brings the level up, so 1.0 (none) is the default.
   float audio_mic_gain = 1.0f;
+  // Acoustic echo cancellation (WebRTC APM). The speaker and microphone share
+  // the one ES8389 codec, so without AEC the agent hears its own voice played
+  // back and talks to itself. On by default.
+  bool audio_aec = true;
+  // Estimated speaker->mic round-trip delay (ms) fed to the echo canceller as
+  // a starting hint. Tune on-board if residual echo leaks through.
+  int audio_aec_delay_ms = 90;
   bool publish_video = true;
 
   // --- UI ---
@@ -48,6 +55,17 @@ struct AppConfig {
   bool autostart = false;  // begin the AI call immediately on launch
   // Interface language: "zh" (Simplified Chinese, default) or "en".
   std::string language = "zh";
+
+  // --- Headless / remote control ---
+  // headless: run with no LVGL/framebuffer/touch UI — for screenless devices.
+  // The assistant is then driven only through the local control API below
+  // (sibling voice / phone modules call it). Requires a framebuffer otherwise.
+  bool headless = false;
+  // Local HTTP control + status API. control_port 0 disables it; when headless
+  // is set and no port was given, load_config defaults it to 8765 so a
+  // screenless device is always controllable.
+  std::string control_bind = "127.0.0.1";
+  int control_port = 0;
 
   LogLevel log_level = LogLevel::Info;
 

@@ -4,8 +4,7 @@
 // an Authorization: Bearer header — never a user token. The client drives the
 // same closed loop the Android "AI 助手" uses:
 //
-//   create_room()    POST /device-api/v1.0/rooms/
-//   start_ai_agent() POST /device-api/v1.0/rooms/{id}/start-ai-agent/
+//   connect_room()   POST /device-api/v1.0/rooms/connect/   (room + agent, one call)
 //   stop_ai_agent()  POST /device-api/v1.0/rooms/{id}/stop-ai-agent/
 #pragma once
 
@@ -22,19 +21,17 @@ class DeviceApiClient {
   DeviceApiClient(std::string base_url, std::string device_api_key,
                   bool verify_tls);
 
-  // Create an anonymous 1v1 AI room. On success fills `out` with the LiveKit
-  // connection info needed to join.
-  ApiOutcome create_room(const std::string& device_id,
-                         const std::string& room_name,
-                         RoomCredentials& out);
-
-  // Dispatch the AI agent into `room_id`. `voice` / `prompt_label` may be empty
-  // to use the provider defaults.
-  ApiOutcome start_ai_agent(const std::string& room_id,
-                            const std::string& device_id,
-                            const std::string& provider,
-                            const std::string& voice,
-                            const std::string& prompt_label);
+  // Set up a 1v1 AI session in a single call: the backend get-or-creates the
+  // device's anonymous room, mints a LiveKit join token, and dispatches the AI
+  // agent. On success fills `out` with the LiveKit connection info needed to
+  // join. `provider` may be empty to use the backend default; `voice` /
+  // `prompt_label` may be empty to use the provider defaults.
+  ApiOutcome connect_room(const std::string& device_id,
+                          const std::string& room_name,
+                          const std::string& provider,
+                          const std::string& voice,
+                          const std::string& prompt_label,
+                          RoomCredentials& out);
 
   // Remove the AI agent from `room_id`.
   ApiOutcome stop_ai_agent(const std::string& room_id);
