@@ -34,10 +34,6 @@ stop_stock_stack() {
 stop_stock_stack
 echo "[run] stock camera stack stopped"
 
-# A Wayland compositor (weston), if present, would hold the DRM/framebuffer.
-wpid=$(pidof weston 2>/dev/null)
-[ -n "$wpid" ] && kill $wpid 2>/dev/null && echo "[run] stopped weston"
-
 # Stopping camera_core_d also stopped its in-process ISP 3A tuning. Start the
 # standalone 3A server so the camera image is auto-exposed / white-balanced —
 # without it the V4L2 frames come out dark grey.

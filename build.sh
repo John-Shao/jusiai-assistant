@@ -5,9 +5,9 @@
 #   ./build.sh [--sdk <livekit-sdk-cpp dir>] [--deps <dir>] [--clean]
 #
 # Sources the SDK's scripts/env-rv1126b.sh (toolchain, sysroot, webrtc/MPP
-# env) and configures with its RV1126B CMake toolchain file. LVGL and
-# nlohmann-json are auto-discovered from a deps/ directory when present, so
-# the build never has to reach GitHub.
+# env) and configures with its RV1126B CMake toolchain file. nlohmann-json
+# is auto-discovered from a deps/ directory when present, so the build never
+# has to reach GitHub.
 # ---------------------------------------------------------------------------
 # Note: no `-u` — the SDK's env-rv1126b.sh probes optional unset variables.
 set -eo pipefail
@@ -46,12 +46,11 @@ source "$ENV_SCRIPT"
 # Auto-discover staged dependency sources so FetchContent never downloads
 # (the build VM cannot reliably reach GitHub). Each staged directory is
 # classified by content and mapped to the matching FETCHCONTENT_SOURCE_DIR_*.
-#   LVGL / NLOHMANN_JSON          — this project
+#   NLOHMANN_JSON                     — this project
 #   LIVEKIT_{ABSEIL,PROTOBUF,SPDLOG} — the LiveKit SDK sub-project
 declare -A FC
 classify_dep() {
   local d="${1%/}"
-  [[ -f "$d/lvgl.h" ]] && FC[LVGL]="$d"
   [[ -f "$d/CMakeLists.txt" && -d "$d/include/nlohmann" ]] && FC[NLOHMANN_JSON]="$d"
   [[ -d "$d/absl" && -f "$d/CMakeLists.txt" ]] && FC[LIVEKIT_ABSEIL]="$d"
   [[ -d "$d/src/google/protobuf" ]] && FC[LIVEKIT_PROTOBUF]="$d"
