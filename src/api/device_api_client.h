@@ -27,7 +27,6 @@ class DeviceApiClient {
   // join. `provider` may be empty to use the backend default; `voice` /
   // `prompt_label` may be empty to use the provider defaults.
   ApiOutcome connect_room(const std::string& device_id,
-                          const std::string& room_name,
                           const std::string& provider,
                           const std::string& voice,
                           const std::string& prompt_label,

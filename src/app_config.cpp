@@ -76,8 +76,6 @@ void apply_kv(AppConfig& cfg, const std::string& key, const std::string& value) 
     cfg.tls_verify = parse_bool(v, cfg.tls_verify);
   } else if (key == "device_id") {
     cfg.device_id = v;
-  } else if (key == "room_name") {
-    if (!v.empty()) cfg.room_name = v;
   } else if (key == "provider") {
     if (!v.empty()) cfg.provider = v;
   } else if (key == "voice") {
@@ -154,7 +152,6 @@ void apply_env(AppConfig& cfg) {
       {"JUSIAI_BASE_URL", "base_url"},
       {"JUSIAI_DEVICE_API_KEY", "device_api_key"},
       {"JUSIAI_DEVICE_ID", "device_id"},
-      {"JUSIAI_ROOM_NAME", "room_name"},
       {"JUSIAI_PROVIDER", "provider"},
       {"JUSIAI_VOICE", "voice"},
       {"JUSIAI_PROMPT_LABEL", "prompt_label"},

@@ -17,7 +17,6 @@ struct AppConfig {
   // Buildroot rootfs ships no CA bundle (auth is the pre-shared device key).
   bool tls_verify = false;
   std::string device_id;                       // auto-generated if empty
-  std::string room_name = "Linux AI 助手";
 
   // --- AI agent ---
   std::string provider = "doubao";               // doubao | doubao_s2s | qwen

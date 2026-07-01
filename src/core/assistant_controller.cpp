@@ -204,9 +204,8 @@ void AssistantController::do_start() {
   set_state(AssistantState::CreatingRoom, tr(Msg::StatusCreatingRoom), {});
   RoomCredentials creds;
   LOG_INFO("controller: calling device-api connect_room ...");
-  ApiOutcome o = api_.connect_room(config_.device_id, config_.room_name,
-                                   config_.provider, config_.voice,
-                                   config_.prompt_label, creds);
+  ApiOutcome o = api_.connect_room(config_.device_id, config_.provider,
+                                   config_.voice, config_.prompt_label, creds);
   LOG_INFO("controller: connect_room -> ok=%d http=%d %s", o.ok, o.http_status,
            o.error.c_str());
   if (!o.ok) {

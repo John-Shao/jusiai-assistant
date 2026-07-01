@@ -85,7 +85,6 @@ ApiOutcome DeviceApiClient::post_json(const std::string& path,
 }
 
 ApiOutcome DeviceApiClient::connect_room(const std::string& device_id,
-                                         const std::string& room_name,
                                          const std::string& provider,
                                          const std::string& voice,
                                          const std::string& prompt_label,
@@ -93,7 +92,6 @@ ApiOutcome DeviceApiClient::connect_room(const std::string& device_id,
   out = RoomCredentials{};
 
   json req = {{"device_id", device_id}};
-  if (!room_name.empty()) req["name"] = room_name;
   if (!provider.empty()) req["provider"] = provider;
 
   json config = json::object();
