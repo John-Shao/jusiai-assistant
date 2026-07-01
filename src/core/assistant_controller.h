@@ -1,11 +1,11 @@
 // AssistantController — drives the one-tap "AI assistant" closed loop:
 //
-//   create room (device API)  ->  connect to LiveKit  ->  publish mic + camera
-//   ->  dispatch the AI agent  ->  converse  ->  stop agent + disconnect
+//   connect (device API)  ->  join LiveKit  ->  publish mic + camera
+//   ->  converse with the AI agent  ->  hang up + disconnect
 //
 // All blocking work (HTTP, LiveKit connect/disconnect) runs on a private
-// worker thread so the UI thread never stalls. UI code interacts through the
-// request_*() commands and polls snapshot() each frame.
+// worker thread. The HTTP control server interacts through the request_*()
+// commands and polls snapshot() when serving /status and /events.
 #pragma once
 
 #include <atomic>
@@ -21,7 +21,6 @@
 #include "app_config.h"
 #include "media/audio_io.h"
 #include "media/camera_io.h"
-#include "media/frame_buffer.h"
 #include "rtc/livekit_session.h"
 
 namespace jusiai {
@@ -37,10 +36,10 @@ enum class AssistantState {
   Error,         // last operation failed
 };
 
-// Immutable view of the controller state for the UI to render.
+// Immutable view of the controller state for the control API to serialise.
 struct UiSnapshot {
   AssistantState state = AssistantState::Idle;
-  std::string status;          // primary status line
+  std::string status;          // primary status line (Simplified Chinese)
   std::string detail;          // secondary line (hint or error)
   bool mic_muted = false;
   bool cam_muted = false;
@@ -56,7 +55,7 @@ class AssistantController {
   AssistantController(const AssistantController&) = delete;
   AssistantController& operator=(const AssistantController&) = delete;
 
-  // Start the preview camera and the worker thread. Call once.
+  // Start the camera and the worker thread. Call once.
   bool init();
   // Stop the conversation (if any), worker thread and media engines.
   void shutdown();
@@ -71,11 +70,8 @@ class AssistantController {
   void request_set_mic_muted(bool muted);
   void request_set_camera_muted(bool muted);
 
-  // Thread-safe snapshot for rendering.
+  // Thread-safe snapshot for the control API to serve as JSON.
   UiSnapshot snapshot() const;
-
-  // Latest camera frame for the preview widget.
-  FrameBuffer* preview() { return &preview_; }
 
  private:
   enum class EventType {
@@ -113,7 +109,6 @@ class AssistantController {
   AppConfig config_;
   DeviceApiClient api_;
 
-  FrameBuffer preview_;
   AudioEngine audio_;
   CameraEngine camera_;
 

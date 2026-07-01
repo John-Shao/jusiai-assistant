@@ -1,5 +1,5 @@
-// Camera engine (RV1126B): captures webcam frames via V4L2, mirrors them to
-// the UI preview and (while publishing is enabled) into a livekit::VideoSource.
+// Camera engine (RV1126B): captures webcam frames via V4L2 and (while
+// publishing is enabled) feeds them to a livekit::VideoSource.
 //
 // Capture runs on its own thread. The RV1126B camera sensor is mounted with a
 // physical rotation, so every frame is rotated by `rotation` degrees and
@@ -18,7 +18,6 @@
 
 namespace jusiai {
 
-class FrameBuffer;
 class V4l2Capture;  // defined in camera_io.cpp
 
 class CameraEngine {
@@ -26,7 +25,7 @@ class CameraEngine {
   // `width`/`height` are the OUTPUT (post-rotation) resolution. `rotation` is
   // 0/90/180/270 degrees clockwise applied to the captured sensor frame.
   CameraEngine(int width, int height, int fps, int rotation,
-               std::string device, FrameBuffer* preview);
+               std::string device);
   ~CameraEngine();
 
   CameraEngine(const CameraEngine&) = delete;
@@ -57,7 +56,6 @@ class CameraEngine {
   const int fps_;
   const int rotation_;   // 0 / 90 / 180 / 270
   const std::string device_;
-  FrameBuffer* preview_;  // not owned
 
   std::shared_ptr<livekit::VideoSource> video_source_;
   std::unique_ptr<V4l2Capture> camera_;

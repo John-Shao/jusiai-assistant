@@ -1,4 +1,4 @@
-// Runtime configuration: backend endpoint, AI agent options, media and UI
+// Runtime configuration: backend endpoint, AI agent options and media
 // parameters. Resolved from (in increasing priority) built-in defaults, a
 // config file, JUSIAI_* environment variables and command-line flags.
 #pragma once
@@ -46,25 +46,15 @@ struct AppConfig {
   int audio_aec_delay_ms = 90;
   bool publish_video = true;
 
-  // --- UI ---
-  // window_* are hints; on the board the panel size comes from the framebuffer.
-  int window_width = 720;
-  int window_height = 1280;
-  bool fullscreen = true;
-  bool autostart = false;  // begin the AI call immediately on launch
-  // Interface language: "zh" (Simplified Chinese, default) or "en".
-  std::string language = "zh";
+  // --- Runtime ---
+  // Begin the AI call immediately on launch, without an explicit `/start`.
+  bool autostart = false;
 
-  // --- Headless / remote control ---
-  // headless: run with no LVGL/framebuffer/touch UI — for screenless devices.
-  // The assistant is then driven only through the local control API below
-  // (sibling voice / phone modules call it). Requires a framebuffer otherwise.
-  bool headless = false;
-  // Local HTTP control + status API. control_port 0 disables it; when headless
-  // is set and no port was given, load_config defaults it to 8765 so a
-  // screenless device is always controllable.
+  // Local HTTP control + status API — the only way to drive the device.
+  // Bind to 0.0.0.0 for phone/remote direct control; keep 127.0.0.1 when a
+  // sibling voice/phone module on the same device is the client.
   std::string control_bind = "127.0.0.1";
-  int control_port = 0;
+  int control_port = 8765;
 
   LogLevel log_level = LogLevel::Info;
 

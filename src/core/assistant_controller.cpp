@@ -1,12 +1,32 @@
 #include "core/assistant_controller.h"
 
-#include "i18n.h"
 #include "log.h"
 
 namespace jusiai {
 namespace {
 
 constexpr auto kAgentJoinTimeout = std::chrono::seconds(45);
+
+// Human-readable status / hint strings. Machine-readable state is in
+// AssistantState; these are Simplified Chinese labels the control API
+// forwards to the phone/remote client for display.
+constexpr const char* kStatusReady        = "就绪";
+constexpr const char* kHintWaiting        = "等待呼叫指令";
+constexpr const char* kStatusCreatingRoom = "正在创建房间...";
+constexpr const char* kStatusConnecting   = "正在连接...";
+constexpr const char* kStatusWakingAgent  = "正在唤起 AI 助手...";
+constexpr const char* kStatusListening    = "聆听中";
+constexpr const char* kStatusEndingCall   = "正在结束通话...";
+constexpr const char* kStatusCallEnded    = "通话已结束";
+constexpr const char* kHintAgentLeft      = "AI 助手已离开房间";
+constexpr const char* kErrAgentNoResponse = "AI 助手未响应";
+constexpr const char* kHintTryAgain       = "请重试";
+constexpr const char* kErrDisconnected    = "连接已断开";
+constexpr const char* kHintConnectionLost = "网络连接已丢失";
+constexpr const char* kErrCreateRoom      = "无法创建房间";
+constexpr const char* kErrConnect         = "无法连接";
+constexpr const char* kHintMediaServer    = "无法连接到媒体服务器";
+constexpr const char* kErrPublishAudio    = "无法发布音频";
 
 }  // namespace
 
@@ -17,7 +37,7 @@ AssistantController::AssistantController(const AppConfig& config)
              config.audio_mic_gain, config.audio_aec,
              config.audio_aec_delay_ms),
       camera_(config.camera_width, config.camera_height, config.camera_fps,
-              config.camera_rotation, config.camera_device, &preview_) {}
+              config.camera_rotation, config.camera_device) {}
 
 AssistantController::~AssistantController() { shutdown(); }
 
@@ -25,12 +45,12 @@ bool AssistantController::init() {
   if (worker_running_) return true;
 
   if (!camera_.start()) {
-    LOG_WARN("controller: camera engine failed to start; preview disabled");
+    LOG_WARN("controller: camera engine failed to start");
   }
 
   worker_running_ = true;
   worker_ = std::thread(&AssistantController::worker_loop, this);
-  set_state(AssistantState::Idle, tr(Msg::StatusReady), tr(Msg::HintTapToBegin));
+  set_state(AssistantState::Idle, kStatusReady, kHintWaiting);
   LOG_INFO("controller: ready (%s)", config_.summary().c_str());
   return true;
 }
@@ -100,8 +120,8 @@ void AssistantController::worker_loop() {
           // Timed out with no event — the agent never showed up.
           lock.unlock();
           if (current_state() == AssistantState::WaitingAgent) {
-            teardown(AssistantState::Error, tr(Msg::ErrAgentNoResponse),
-                     tr(Msg::HintTryAgain));
+            teardown(AssistantState::Error, kErrAgentNoResponse,
+                     kHintTryAgain);
           }
           continue;
         }
@@ -114,8 +134,8 @@ void AssistantController::worker_loop() {
 
     if (ev.type == EventType::CmdQuit) {
       if (current_state() != AssistantState::Idle) {
-        teardown(AssistantState::Idle, tr(Msg::StatusReady),
-                 tr(Msg::HintTapToBegin));
+        teardown(AssistantState::Idle, kStatusReady,
+                 kHintWaiting);
       }
       break;
     }
@@ -170,14 +190,14 @@ void AssistantController::handle(const Event& ev) {
 
     case EventType::EvAgentOnline:
       if (state == AssistantState::WaitingAgent) {
-        set_state(AssistantState::InCall, tr(Msg::StatusListening));
+        set_state(AssistantState::InCall, kStatusListening);
       }
       break;
 
     case EventType::EvAgentOffline:
       if (state == AssistantState::InCall) {
-        teardown(AssistantState::Idle, tr(Msg::StatusCallEnded),
-                 tr(Msg::HintAgentLeft));
+        teardown(AssistantState::Idle, kStatusCallEnded,
+                 kHintAgentLeft);
       }
       break;
 
@@ -185,8 +205,8 @@ void AssistantController::handle(const Event& ev) {
       if (state == AssistantState::Connecting ||
           state == AssistantState::WaitingAgent ||
           state == AssistantState::InCall) {
-        teardown(AssistantState::Error, tr(Msg::ErrDisconnected),
-                 ev.text.empty() ? std::string(tr(Msg::HintConnectionLost))
+        teardown(AssistantState::Error, kErrDisconnected,
+                 ev.text.empty() ? std::string(kHintConnectionLost)
                                   : ev.text);
       }
       break;
@@ -201,7 +221,7 @@ void AssistantController::handle(const Event& ev) {
 void AssistantController::do_start() {
   // 1. Set up the 1v1 AI session in one call: the device API get-or-creates the
   //    room, returns LiveKit credentials, and dispatches the AI agent.
-  set_state(AssistantState::CreatingRoom, tr(Msg::StatusCreatingRoom), {});
+  set_state(AssistantState::CreatingRoom, kStatusCreatingRoom, {});
   RoomCredentials creds;
   LOG_INFO("controller: calling device-api connect_room ...");
   ApiOutcome o = api_.connect_room(config_.device_id, config_.provider,
@@ -209,7 +229,7 @@ void AssistantController::do_start() {
   LOG_INFO("controller: connect_room -> ok=%d http=%d %s", o.ok, o.http_status,
            o.error.c_str());
   if (!o.ok) {
-    teardown(AssistantState::Error, tr(Msg::ErrCreateRoom), o.error);
+    teardown(AssistantState::Error, kErrCreateRoom, o.error);
     return;
   }
   room_id_ = creds.room_id;
@@ -217,7 +237,7 @@ void AssistantController::do_start() {
            creds.livekit_url.c_str());
 
   // 2. Join the LiveKit room.
-  set_state(AssistantState::Connecting, tr(Msg::StatusConnecting));
+  set_state(AssistantState::Connecting, kStatusConnecting);
   session_ = std::make_unique<LiveKitSession>();
 
   LiveKitSession::Callbacks cb;
@@ -237,14 +257,14 @@ void AssistantController::do_start() {
   session_->set_callbacks(std::move(cb));
 
   if (!session_->connect(creds.livekit_url, creds.livekit_token)) {
-    teardown(AssistantState::Error, tr(Msg::ErrConnect),
-             tr(Msg::HintMediaServer));
+    teardown(AssistantState::Error, kErrConnect,
+             kHintMediaServer);
     return;
   }
 
   // 3. Publish the local microphone (and camera).
   if (!session_->publish_audio(audio_.audio_source())) {
-    teardown(AssistantState::Error, tr(Msg::ErrPublishAudio), {});
+    teardown(AssistantState::Error, kErrPublishAudio, {});
     return;
   }
   audio_.start_mic();
@@ -262,19 +282,19 @@ void AssistantController::do_start() {
   // 4. The AI agent was already dispatched by connect_room (step 1); it joins
   //    the room and waits for this device participant. Wait for it to come
   //    online, up to the deadline the worker loop enforces.
-  set_state(AssistantState::WaitingAgent, tr(Msg::StatusWakingAgent));
+  set_state(AssistantState::WaitingAgent, kStatusWakingAgent);
   agent_deadline_ = std::chrono::steady_clock::now() + kAgentJoinTimeout;
   LOG_INFO("controller: waiting for the AI agent to join");
 }
 
 void AssistantController::do_stop() {
-  teardown(AssistantState::Idle, tr(Msg::StatusReady), tr(Msg::HintTapToBegin));
+  teardown(AssistantState::Idle, kStatusReady, kHintWaiting);
 }
 
 void AssistantController::teardown(AssistantState final_state,
                                    const std::string& status,
                                    const std::string& detail) {
-  set_state(AssistantState::Stopping, tr(Msg::StatusEndingCall), {});
+  set_state(AssistantState::Stopping, kStatusEndingCall, {});
 
   if (!room_id_.empty()) {
     api_.stop_ai_agent(room_id_);  // best effort

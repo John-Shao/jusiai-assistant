@@ -104,18 +104,8 @@ void apply_kv(AppConfig& cfg, const std::string& key, const std::string& value) 
     cfg.audio_aec_delay_ms = parse_int(v, cfg.audio_aec_delay_ms);
   } else if (key == "publish_video") {
     cfg.publish_video = parse_bool(v, cfg.publish_video);
-  } else if (key == "window_width") {
-    cfg.window_width = parse_int(v, cfg.window_width);
-  } else if (key == "window_height") {
-    cfg.window_height = parse_int(v, cfg.window_height);
-  } else if (key == "fullscreen") {
-    cfg.fullscreen = parse_bool(v, cfg.fullscreen);
   } else if (key == "autostart") {
     cfg.autostart = parse_bool(v, cfg.autostart);
-  } else if (key == "language") {
-    if (!v.empty()) cfg.language = v;
-  } else if (key == "headless") {
-    cfg.headless = parse_bool(v, cfg.headless);
   } else if (key == "control_bind") {
     if (!v.empty()) cfg.control_bind = v;
   } else if (key == "control_port") {
@@ -156,8 +146,6 @@ void apply_env(AppConfig& cfg) {
       {"JUSIAI_VOICE", "voice"},
       {"JUSIAI_PROMPT_LABEL", "prompt_label"},
       {"JUSIAI_AUTOSTART", "autostart"},
-      {"JUSIAI_LANGUAGE", "language"},
-      {"JUSIAI_HEADLESS", "headless"},
       {"JUSIAI_CONTROL_BIND", "control_bind"},
       {"JUSIAI_CONTROL_PORT", "control_port"},
       {"JUSIAI_LOG_LEVEL", "log_level"},
@@ -169,7 +157,7 @@ void apply_env(AppConfig& cfg) {
 
 void print_usage(const char* prog) {
   std::fprintf(stderr,
-      "JuSi AI Assistant " JUSIAI_VERSION " — Linux audio/video AI assistant\n\n"
+      "JuSi AI Assistant " JUSIAI_VERSION " — headless audio/video AI assistant\n\n"
       "Usage: %s [options]\n\n"
       "Options:\n"
       "  --config <path>        Configuration file to load\n"
@@ -182,11 +170,8 @@ void print_usage(const char* prog) {
       "  --no-video             Do not publish the local camera track\n"
       "  --no-aec               Disable acoustic echo cancellation\n"
       "  --aec-delay <ms>       Echo-canceller speaker->mic delay hint (ms)\n"
-      "  --fullscreen           Start the window in fullscreen\n"
       "  --autostart            Begin the AI call immediately on launch\n"
-      "  --language <lang>      Interface language: zh | en (default zh)\n"
-      "  --headless             Run with no display UI (for screenless devices)\n"
-      "  --control-port <port>  Local HTTP control API port (0 disables it)\n"
+      "  --control-port <port>  Local HTTP control API port (default 8765)\n"
       "  --control-bind <addr>  Control API bind address (default 127.0.0.1)\n"
       "  --log-level <lvl>      debug | info | warn | error (default info)\n"
       "  -h, --help             Show this help and exit\n",
@@ -200,11 +185,11 @@ std::string AppConfig::summary() const {
   os << "base_url=" << base_url << " provider=" << provider
      << " device_id=" << (device_id.empty() ? "<auto>" : device_id)
      << " video=" << (publish_video ? "on" : "off")
-     << " aec=" << (audio_aec ? "on" : "off")
-     << " window=" << window_width << "x" << window_height
-     << " headless=" << (headless ? "on" : "off");
+     << " aec=" << (audio_aec ? "on" : "off");
   if (control_port > 0) {
     os << " control=" << control_bind << ":" << control_port;
+  } else {
+    os << " control=disabled";
   }
   return os.str();
 }
@@ -335,14 +320,8 @@ AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code) 
     } else if (a == "--aec-delay") {
       if (const char* v = next(i))
         cfg.audio_aec_delay_ms = parse_int(v, cfg.audio_aec_delay_ms);
-    } else if (a == "--fullscreen") {
-      cfg.fullscreen = true;
     } else if (a == "--autostart") {
       cfg.autostart = true;
-    } else if (a == "--language") {
-      if (const char* v = next(i)) cfg.language = v;
-    } else if (a == "--headless") {
-      cfg.headless = true;
     } else if (a == "--control-port") {
       if (const char* v = next(i)) cfg.control_port = parse_int(v, cfg.control_port);
     } else if (a == "--control-bind") {
@@ -364,14 +343,6 @@ AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code) 
     cfg.base_url.pop_back();
   }
   cfg.device_id = resolve_device_id(cfg.device_id);
-
-  // A headless device has no touch UI, so it must be reachable through the
-  // control API — give it a default port if the operator did not set one.
-  if (cfg.headless && cfg.control_port == 0) {
-    cfg.control_port = 8765;
-    LOG_INFO("config: headless with no control_port set — defaulting to %d",
-             cfg.control_port);
-  }
   return cfg;
 }
 

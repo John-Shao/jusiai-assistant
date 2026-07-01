@@ -1,13 +1,9 @@
-// JuSi AI Assistant — RV1126B audio/video AI assistant client.
+// JuSi AI Assistant — headless audio/video AI assistant client.
 //
-// Reproduces the one-tap "AI 助手" flow of the JuSi Meet Android app on the
-// Rockchip RV1126B board, built on the LiveKit C++ SDK with an LVGL GUI
-// rendered to the Linux framebuffer (V4L2 camera, ALSA audio, no SDL/GPU).
-//
-// On a screenless device, run with --headless: the LVGL/framebuffer UI is
-// skipped and the assistant is driven only through the local HTTP control
-// API (see control/control_server.h), which sibling voice / phone modules
-// call.
+// Runs on screenless devices (Rockchip RV1126B IPC boards and similar). All
+// interaction happens through the local HTTP control API (see control/); the
+// closed loop itself (device-API connect → LiveKit → publish mic + camera →
+// converse → hang up) runs on the controller's worker thread.
 #include <unistd.h>
 
 #include <atomic>
@@ -21,10 +17,8 @@
 #include "app_config.h"
 #include "control/control_server.h"
 #include "core/assistant_controller.h"
-#include "i18n.h"
 #include "livekit/livekit.h"
 #include "log.h"
-#include "ui/ui_app.h"
 
 namespace {
 
@@ -50,21 +44,19 @@ void configure_tls_bundle() {
   LOG_INFO("tls: using CA bundle %s", ca.c_str());
 }
 
-// --- Headless run loop ---------------------------------------------------
-// With no display there is no render loop to keep main() alive, so block on
-// a signal instead. The closed loop itself runs on the controller's own
-// worker thread; the control API drives it.
-std::atomic<bool> g_headless_quit{false};
-void on_headless_signal(int) { g_headless_quit.store(true); }
+// Signal-driven quit — the closed loop runs on the controller's worker
+// thread; main() just blocks here until asked to exit.
+std::atomic<bool> g_quit{false};
+void on_signal(int) { g_quit.store(true); }
 
-void run_headless() {
-  std::signal(SIGINT, on_headless_signal);
-  std::signal(SIGTERM, on_headless_signal);
-  LOG_INFO("headless: running — send SIGINT/SIGTERM to quit");
-  while (!g_headless_quit.load()) {
+void wait_for_signal() {
+  std::signal(SIGINT, on_signal);
+  std::signal(SIGTERM, on_signal);
+  LOG_INFO("running — send SIGINT/SIGTERM to quit");
+  while (!g_quit.load()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
   }
-  LOG_INFO("headless: stopping");
+  LOG_INFO("stopping");
 }
 
 }  // namespace
@@ -78,8 +70,6 @@ int main(int argc, char** argv) {
   AppConfig config = load_config(argc, argv, should_exit, exit_code);
   if (should_exit) return exit_code;
   set_log_level(config.log_level);
-  // Select the UI language before anything produces user-facing text.
-  set_language(lang_from_string(config.language));
 
   LOG_INFO("JuSi AI Assistant %s starting", JUSIAI_VERSION);
   LOG_INFO("config: %s", config.summary().c_str());
@@ -97,44 +87,20 @@ int main(int argc, char** argv) {
       LOG_ERROR("failed to initialise the assistant controller");
       result = 1;
     } else {
-      // Optional local HTTP control + status API. Always required headless
-      // (it is the only way to drive the device); optional with a display.
-      std::unique_ptr<ControlServer> control;
-      if (config.control_port > 0) {
-        control = std::make_unique<ControlServer>(&controller, config);
-        if (!control->start()) {
-          if (config.headless) {
-            LOG_ERROR("control API failed to start — a headless device "
-                      "would be uncontrollable");
-            result = 1;
-          } else {
-            LOG_WARN("control API failed to start; continuing with the UI");
-          }
-          control.reset();
-        }
-      }
-
-      auto begin_autostart = [&] {
+      // Local HTTP control + status API — the only way to drive the device.
+      std::unique_ptr<ControlServer> control =
+          std::make_unique<ControlServer>(&controller, config);
+      if (!control->start()) {
+        LOG_ERROR("control API failed to start — the device would be "
+                  "uncontrollable");
+        result = 1;
+      } else {
         if (config.autostart) {
           LOG_INFO("autostart: beginning the AI call");
           controller.request_start();
         }
-      };
-
-      if (result == 0 && config.headless) {
-        begin_autostart();
-        run_headless();  // blocks until SIGINT/SIGTERM
-      } else if (result == 0) {
-        UiApp ui(&controller, config);
-        if (!ui.init()) {
-          LOG_ERROR("failed to initialise the UI");
-          result = 1;
-        } else {
-          begin_autostart();
-          ui.run();  // blocks until SIGINT/SIGTERM
-        }
+        wait_for_signal();
       }
-
       if (control) control->stop();
     }
     controller.shutdown();

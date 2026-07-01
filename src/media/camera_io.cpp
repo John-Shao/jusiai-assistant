@@ -14,7 +14,6 @@
 
 #include "livekit/video_frame.h"
 #include "log.h"
-#include "media/frame_buffer.h"
 
 namespace jusiai {
 
@@ -258,13 +257,12 @@ void make_synthetic_frame(int w, int h, std::uint64_t frame,
 }  // namespace
 
 CameraEngine::CameraEngine(int width, int height, int fps, int rotation,
-                           std::string device, FrameBuffer* preview)
+                           std::string device)
     : width_(width > 0 ? width : 480),
       height_(height > 0 ? height : 640),
       fps_(fps > 0 ? fps : 30),
       rotation_(((rotation % 360) + 360) % 360),
-      device_(std::move(device)),
-      preview_(preview) {}
+      device_(std::move(device)) {}
 
 CameraEngine::~CameraEngine() { stop(); }
 
@@ -338,9 +336,6 @@ void CameraEngine::deliver(const std::vector<std::uint8_t>& rgba,
                            std::int64_t timestamp_us) {
   if (rgba.size() != static_cast<std::size_t>(width_) * height_ * 4) return;
 
-  if (preview_) {
-    preview_->publish(width_, height_, rgba.data(), rgba.size());
-  }
   if (!publishing_.load() || !video_source_) return;
 
   try {
