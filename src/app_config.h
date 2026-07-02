@@ -21,9 +21,7 @@ struct AppConfig {
   // --- AI agent ---
   std::string provider = "doubao";               // doubao | doubao_s2s | qwen
   std::string voice;                            // empty -> provider default
-  std::string prompt_id;                        // preferred v2 prompt selector
-  std::string prompt_label = "通用 AI 助手";
-  std::string prompt_content;                   // optional custom prompt text
+  std::string prompt_id;                        // ai-agent-config-v2 prompts[].id
 
   // --- Media ---
   // camera_width/height are the OUTPUT (post-rotation) resolution. The
@@ -67,12 +65,25 @@ struct AppConfig {
 // Parse command line / environment / config file into an AppConfig.
 // On --help or a parse error, prints to stderr; `should_exit` is set and
 // `exit_code` carries the process exit status the caller should use.
-AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code);
+// `skip_runtime_layer=true` bypasses the runtime override file — used by
+// main.cpp's self-heal path after a persisted bad config has been quarantined,
+// so the retry attempt is made with the config-file / env / CLI defaults only.
+AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code,
+                      bool skip_runtime_layer = false);
 
 // Persist the runtime-selectable AI agent settings changed through the local
 // control API. These overrides are loaded after the config file and before
 // environment variables / command-line flags.
 bool save_runtime_agent_config(const AppConfig& cfg, std::string* error);
+
+// True if the runtime agent-config override file is currently on disk.
+bool has_runtime_agent_config();
+
+// Rename the runtime agent-config file to `agent_config.rejected.json.<epoch>`
+// as a post-mortem breadcrumb; returns true if a file was moved. Used by the
+// self-heal path when persisted overrides caused the backend to reject the
+// start-chat-bot request.
+bool quarantine_runtime_agent_config();
 
 // Return a stable device id. When `configured` is empty, derive one from
 // the SoC eFuse serial (via /proc/cpuinfo "Serial") as `JUSI-<serial>` —

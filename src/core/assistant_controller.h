@@ -77,6 +77,16 @@ class AssistantController {
   bool set_agent_config(const AppConfig& config);
   AppConfig config_snapshot() const;
 
+  // HTTP status returned by the most recent backend start-chat-bot request:
+  //   0                — never attempted (or transport failure with no
+  //                       response, e.g. DNS / TCP timeout)
+  //   200 / 201        — accepted
+  //   400-499          — rejected by the backend (bad profile/voice/prompt)
+  //   500-599          — backend error
+  // main.cpp's autostart self-heal path reads this after a first-attempt
+  // failure to decide whether the persisted runtime config is at fault.
+  int last_start_http_status() const { return last_start_http_status_.load(); }
+
   // Thread-safe snapshot for the control API to serve as JSON.
   UiSnapshot snapshot() const;
 
@@ -126,6 +136,7 @@ class AssistantController {
   std::unique_ptr<LiveKitSession> session_;  // worker thread only
   std::string room_id_;                      // worker thread only
   std::uint64_t session_generation_ = 0;      // worker thread only
+  std::atomic<int> last_start_http_status_{0};  // read by main.cpp guardrail
 
   // Worker thread + event queue.
   std::thread worker_;

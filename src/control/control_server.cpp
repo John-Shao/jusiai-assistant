@@ -52,8 +52,6 @@ json agent_config_json(const AppConfig& cfg) {
       {"provider", cfg.provider},
       {"voice", cfg.voice},
       {"prompt_id", cfg.prompt_id},
-      {"prompt_label", cfg.prompt_label},
-      {"prompt_content", cfg.prompt_content},
   };
 }
 
@@ -182,14 +180,6 @@ bool parse_agent_config_update(const httplib::Request& req, AppConfig* cfg,
                               &changed)) {
       return false;
     }
-    if (!assign_object_string(p, "label", &cfg->prompt_label, "prompt",
-                              error, &changed)) {
-      return false;
-    }
-    if (!assign_object_string(p, "content", &cfg->prompt_content, "prompt",
-                              error, &changed)) {
-      return false;
-    }
   }
 
   if (body.contains("prompt_id")) {
@@ -197,20 +187,10 @@ bool parse_agent_config_update(const httplib::Request& req, AppConfig* cfg,
                              error)) return false;
     changed = true;
   }
-  if (body.contains("prompt_label")) {
-    if (!assign_string_value(body["prompt_label"], &cfg->prompt_label,
-                             "prompt_label", error)) return false;
-    changed = true;
-  }
-  if (body.contains("prompt_content")) {
-    if (!assign_string_value(body["prompt_content"], &cfg->prompt_content,
-                             "prompt_content", error)) return false;
-    changed = true;
-  }
 
   if (!changed) {
     *error = "no supported fields; expected profile_code/provider/profile, "
-             "voice, prompt_id, prompt_label, prompt_content or prompt";
+             "voice, prompt_id or prompt";
     return false;
   }
   return true;
@@ -334,6 +314,10 @@ bool ControlServer::start() {
       return;
     }
 
+    // Persist THEN apply. Safe today because set_agent_config() cannot fail
+    // (it only mutates in-memory state under a mutex). If you ever add
+    // validation to set_agent_config, run that check BEFORE this save so a
+    // rejected update never leaks onto disk.
     if (!save_runtime_agent_config(cfg, &error)) {
       res.status = 500;
       res.set_content(json({{"ok", false}, {"error", error}}).dump(),

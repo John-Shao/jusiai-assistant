@@ -96,11 +96,10 @@ cd /opt/jusiai && ./run.sh --autostart     # 启动即自动发起 AI 通话
 
 `POST /config` 使用 `ai-agent-config-v2` 的字段语义: `profile_code` 取
 `profiles[].code`, `voice` 取 `profiles[].voices[].value`, `prompt_id` 取
-`prompts[].id`; 也兼容 `prompt_label` / `prompt_content`。它还可以直接接收
-选中的对象: `{"profile":{"code":"qwen"},"voice":{"value":"Serena"},"prompt":{"id":"..."}}`。
-配置会保存到 `~/.config/jusiai-assistant/agent_config.json`,其中 prompt 只持久化
-`prompt_id`; `prompt_label` / `prompt_content` 可用于本次立即生效但不会写入该文件。
-如果当前正在通话,应用会自动重启本次会话以使用新配置。
+`prompts[].id`。也可以直接接收选中的对象:
+`{"profile":{"code":"qwen"},"voice":{"value":"Serena"},"prompt":{"id":"..."}}`。
+配置会保存到 `~/.config/jusiai-assistant/agent_config.json` 并在下次启动自动
+加载。如果当前正在通话,应用会自动重启本次会话以使用新配置。
 
 | 字段 | 说明 |
 |------|------|
@@ -272,9 +271,7 @@ es.addEventListener('status', e => {      // 注意:不是 onmessage
 | `tls_verify` | 校验后端 TLS 证书(板上无系统 CA 库,默认关)| `false` |
 | `provider` / `--provider` / `--profile-code` | `ai-agent-config-v2` 的 `profiles[].code` | `doubao` |
 | `voice` / `--voice` | `ai-agent-config-v2` 的 `profiles[].voices[].value` | 空=后端默认 |
-| `prompt_id` / `--prompt-id` | `ai-agent-config-v2` 的 `prompts[].id`(推荐) | 空 |
-| `prompt_label` / `--prompt-label` | `ai-agent-config-v2` 的 `prompts[].label`(兼容) | `通用 AI 助手` |
-| `prompt_content` / `--prompt-content` | 自定义系统提示词内容 | 空 |
+| `prompt_id` / `--prompt-id` | `ai-agent-config-v2` 的 `prompts[].id` | 空 |
 | `camera_rotation` | 摄像头顺时针旋转角(传感器物理装配补偿)| `90` |
 | `camera_device` | V4L2 摄像头节点 | `/dev/video-camera0` |
 | `audio_mic_gain` | 麦克风软件增益(编解码器 PGA 已足够,默认不额外加)| `1.0` |

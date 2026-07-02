@@ -49,14 +49,44 @@ void configure_tls_bundle() {
 std::atomic<bool> g_quit{false};
 void on_signal(int) { g_quit.store(true); }
 
-void wait_for_signal() {
+void install_signal_handlers() {
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
+}
+
+void wait_for_signal() {
   LOG_INFO("running — send SIGINT/SIGTERM to quit");
   while (!g_quit.load()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
   }
   LOG_INFO("stopping");
+}
+
+enum class FirstStartOutcome {
+  Success,        // reached InCall
+  ServerRejected, // reached Error and the last start_chat_bot was HTTP 4xx
+  Other,          // Error with non-4xx status, or timeout / quit
+};
+
+// Watch the controller's snapshot until autostart's very first start attempt
+// lands on InCall or Error (bounded ~60 s and by g_quit so SIGTERM is prompt).
+FirstStartOutcome wait_first_start(const jusiai::AssistantController& c) {
+  using clock = std::chrono::steady_clock;
+  const auto deadline = clock::now() + std::chrono::seconds(60);
+  while (clock::now() < deadline && !g_quit.load()) {
+    const jusiai::UiSnapshot s = c.snapshot();
+    if (s.state == jusiai::AssistantState::InCall) {
+      return FirstStartOutcome::Success;
+    }
+    if (s.state == jusiai::AssistantState::Error) {
+      const int http = c.last_start_http_status();
+      return (http >= 400 && http < 500)
+                 ? FirstStartOutcome::ServerRejected
+                 : FirstStartOutcome::Other;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  }
+  return FirstStartOutcome::Other;
 }
 
 }  // namespace
@@ -106,9 +136,35 @@ int main(int argc, char** argv) {
       }
 
       if (result == 0) {
+        install_signal_handlers();  // catch SIGINT/SIGTERM during the guardrail
         if (config.autostart) {
+          const bool had_runtime = has_runtime_agent_config();
           LOG_INFO("autostart: beginning the AI call");
           controller.request_start();
+
+          // Self-heal guardrail: a bad value in the persisted runtime config
+          // (a voice / prompt_id / profile_code that the backend has removed
+          // or the operator typo'd via POST /config) would 400-lock the
+          // device on every boot. If the first autostart attempt is rejected
+          // by the backend with an HTTP 4xx, quarantine the file and retry
+          // once with the config-file / env / CLI defaults. One shot only —
+          // further failures are surfaced normally so the operator sees them.
+          if (had_runtime &&
+              wait_first_start(controller) ==
+                  FirstStartOutcome::ServerRejected) {
+            LOG_WARN(
+                "autostart: backend rejected the persisted runtime agent "
+                "config — quarantining and retrying once with defaults");
+            if (quarantine_runtime_agent_config()) {
+              bool _se = false;
+              int _ec = 0;
+              AppConfig defaults =
+                  load_config(argc, argv, _se, _ec,
+                              /*skip_runtime_layer=*/true);
+              controller.set_agent_config(defaults);
+              controller.request_start();
+            }
+          }
         }
         wait_for_signal();
       }

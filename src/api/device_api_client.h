@@ -24,14 +24,14 @@ class DeviceApiClient {
   // Set up a 1v1 AI session in a single call: the backend get-or-creates the
   // device's anonymous room, mints a LiveKit join token, and dispatches the AI
   // agent. On success fills `out` with the LiveKit connection info needed to
-  // join. `provider` may be empty to use the backend default; `voice` selects
-  // the output voice; prompt fields may be empty to use the profile defaults.
+  // join. `profile_code` may be empty to use the backend default; `voice`
+  // selects the output voice; `prompt_id` selects a predefined prompt from
+  // ai-agent-config-v2 (empty => provider default). start-chat-bot only accepts
+  // prompt_id — custom prompt_label/prompt_content are not supported here.
   ApiOutcome start_chat_bot(const std::string& device_id,
                             const std::string& profile_code,
                             const std::string& voice,
                             const std::string& prompt_id,
-                            const std::string& prompt_label,
-                            const std::string& prompt_content,
                             RoomCredentials& out);
 
   // End the device's active 1v1 AI session: removes the AI agent and ends the

@@ -88,21 +88,18 @@ ApiOutcome DeviceApiClient::start_chat_bot(const std::string& device_id,
                                            const std::string& profile_code,
                                            const std::string& voice,
                                            const std::string& prompt_id,
-                                           const std::string& prompt_label,
-                                           const std::string& prompt_content,
                                            RoomCredentials& out) {
   out = RoomCredentials{};
 
   // Flat field layout: AI settings sit at the top level (no nested "config").
   // The provider is sent as `profile_code` (ai-agent-config-v2's profiles[].code).
+  // start-chat-bot only accepts `prompt_id` to pick a predefined prompt; the
+  // server rejects custom prompt_label/prompt_content, so we never send them.
+  // Empty prompt_id => the backend uses the provider's default prompt.
   json req = {{"device_id", device_id}};
   if (!profile_code.empty()) req["profile_code"] = profile_code;
   if (!voice.empty()) req["voice"] = voice;
   if (!prompt_id.empty()) req["prompt_id"] = prompt_id;
-  if (!prompt_content.empty()) req["prompt_content"] = prompt_content;
-  if (!prompt_label.empty() && (prompt_id.empty() || !prompt_content.empty())) {
-    req["prompt_label"] = prompt_label;
-  }
 
   std::string body;
   ApiOutcome outcome =

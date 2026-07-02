@@ -89,16 +89,12 @@ bool AssistantController::set_agent_config(const AppConfig& config) {
     config_.provider = config.provider;
     config_.voice = config.voice;
     config_.prompt_id = config.prompt_id;
-    config_.prompt_label = config.prompt_label;
-    config_.prompt_content = config.prompt_content;
   }
 
-  LOG_INFO("controller: agent config updated profile=%s voice=%s prompt_id=%s "
-           "prompt_label=%s",
+  LOG_INFO("controller: agent config updated profile=%s voice=%s prompt_id=%s",
            config.provider.empty() ? "default" : config.provider.c_str(),
            config.voice.empty() ? "default" : config.voice.c_str(),
-           config.prompt_id.empty() ? "<none>" : config.prompt_id.c_str(),
-           config.prompt_label.empty() ? "<none>" : config.prompt_label.c_str());
+           config.prompt_id.empty() ? "<none>" : config.prompt_id.c_str());
 
   const AssistantState state = current_state();
   if (state == AssistantState::CreatingRoom ||
@@ -280,8 +276,8 @@ void AssistantController::do_start() {
   LOG_INFO("controller: calling device-api start_chat_bot ...");
   const AppConfig cfg = config_snapshot();
   ApiOutcome o = api_.start_chat_bot(cfg.device_id, cfg.provider, cfg.voice,
-                                     cfg.prompt_id, cfg.prompt_label,
-                                     cfg.prompt_content, creds);
+                                     cfg.prompt_id, creds);
+  last_start_http_status_.store(o.http_status);
   LOG_INFO("controller: start_chat_bot -> ok=%d http=%d %s", o.ok, o.http_status,
            o.error.c_str());
   if (!o.ok) {

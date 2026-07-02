@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -89,10 +90,6 @@ void apply_kv(AppConfig& cfg, const std::string& key, const std::string& value) 
     cfg.voice = v;
   } else if (key == "prompt_id") {
     cfg.prompt_id = v;
-  } else if (key == "prompt_label") {
-    cfg.prompt_label = v;
-  } else if (key == "prompt_content") {
-    cfg.prompt_content = v;
   } else if (key == "camera_width") {
     cfg.camera_width = parse_int(v, cfg.camera_width);
   } else if (key == "camera_height") {
@@ -144,6 +141,32 @@ bool load_config_file(AppConfig& cfg, const fs::path& path) {
   return true;
 }
 
+}  // anonymous namespace
+
+bool has_runtime_agent_config() {
+  std::error_code ec;
+  return fs::exists(runtime_agent_config_path(), ec);
+}
+
+bool quarantine_runtime_agent_config() {
+  const fs::path src = runtime_agent_config_path();
+  std::error_code ec;
+  if (!fs::exists(src, ec)) return false;
+  const auto ts = static_cast<long long>(std::time(nullptr));
+  const fs::path dst = src.string() + ".rejected." + std::to_string(ts);
+  fs::rename(src, dst, ec);
+  if (ec) {
+    LOG_WARN("config: could not quarantine %s: %s", src.string().c_str(),
+             ec.message().c_str());
+    return false;
+  }
+  LOG_INFO("config: quarantined runtime agent config to %s",
+           dst.string().c_str());
+  return true;
+}
+
+namespace {
+
 void load_runtime_agent_config(AppConfig& cfg) {
   const fs::path path = runtime_agent_config_path();
   std::ifstream in(path);
@@ -185,8 +208,6 @@ void apply_env(AppConfig& cfg) {
       {"JUSIAI_PROFILE_CODE", "profile_code"},
       {"JUSIAI_VOICE", "voice"},
       {"JUSIAI_PROMPT_ID", "prompt_id"},
-      {"JUSIAI_PROMPT_LABEL", "prompt_label"},
-      {"JUSIAI_PROMPT_CONTENT", "prompt_content"},
       {"JUSIAI_AUTOSTART", "autostart"},
       {"JUSIAI_CONTROL_BIND", "control_bind"},
       {"JUSIAI_CONTROL_PORT", "control_port"},
@@ -210,8 +231,6 @@ void print_usage(const char* prog) {
       "  --profile-code <p>     AI profile code (alias for --provider)\n"
       "  --voice <voice>        AI output voice\n"
       "  --prompt-id <id>       Prompt id from ai-agent-config-v2\n"
-      "  --prompt-label <name>  AI assistant persona label\n"
-      "  --prompt-content <txt> Custom prompt content\n"
       "  --no-video             Do not publish the local camera track\n"
       "  --no-aec               Disable acoustic echo cancellation\n"
       "  --aec-delay <ms>       Echo-canceller speaker->mic delay hint (ms)\n"
@@ -254,14 +273,38 @@ bool save_runtime_agent_config(const AppConfig& cfg, std::string* error) {
       {"prompt_id", cfg.prompt_id},
   };
 
-  std::ofstream out(path);
-  if (!out.is_open()) {
-    if (error) *error = "cannot open " + path.string() + " for writing";
-    return false;
+  // Atomic replace: write the new JSON to a sibling `.tmp`, then rename() it
+  // onto the target. On POSIX, rename over an existing file is atomic, so a
+  // mid-write interrupt (SIGKILL, power loss) can never leave the target
+  // half-written and unparseable — which the load path would silently discard,
+  // losing the operator's persisted override.
+  //
+  // Note: this guarantees "either the old or the new file is visible", not
+  // "the new file survives a power loss right after we return". Full
+  // durability would additionally fsync(fd) and fsync(directory) before the
+  // rename; we don't, because the plain iostream write path stays simpler and
+  // the operator can always re-POST if the very last write is lost.
+  const fs::path tmp = path.string() + ".tmp";
+  {
+    std::ofstream out(tmp, std::ios::trunc);
+    if (!out.is_open()) {
+      if (error) *error = "cannot open " + tmp.string() + " for writing";
+      return false;
+    }
+    out << j.dump(2) << "\n";
+    out.close();
+    if (!out) {
+      if (error) *error = "failed to write " + tmp.string();
+      fs::remove(tmp, ec);
+      return false;
+    }
   }
-  out << j.dump(2) << "\n";
-  if (!out.good()) {
-    if (error) *error = "failed to write " + path.string();
+  fs::rename(tmp, path, ec);
+  if (ec) {
+    if (error) *error = "cannot rename " + tmp.string() + " -> " +
+                        path.string() + ": " + ec.message();
+    std::error_code rm_ec;
+    fs::remove(tmp, rm_ec);
     return false;
   }
   LOG_INFO("config: saved runtime agent config %s", path.string().c_str());
@@ -323,7 +366,8 @@ std::string resolve_device_id(const std::string& configured) {
   return id;
 }
 
-AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code) {
+AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code,
+                      bool skip_runtime_layer) {
   should_exit = false;
   exit_code = 0;
   AppConfig cfg;
@@ -358,7 +402,11 @@ AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code) 
   }
 
   // Layer: runtime agent config persisted by the local control API.
-  load_runtime_agent_config(cfg);
+  // (Skipped by main.cpp's self-heal path when a bad file has just been
+  // quarantined.)
+  if (!skip_runtime_layer) {
+    load_runtime_agent_config(cfg);
+  }
 
   // Layer: environment.
   apply_env(cfg);
@@ -390,10 +438,6 @@ AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code) 
       if (const char* v = next(i)) cfg.voice = v;
     } else if (a == "--prompt-id") {
       if (const char* v = next(i)) cfg.prompt_id = v;
-    } else if (a == "--prompt-label") {
-      if (const char* v = next(i)) cfg.prompt_label = v;
-    } else if (a == "--prompt-content") {
-      if (const char* v = next(i)) cfg.prompt_content = v;
     } else if (a == "--no-video") {
       cfg.publish_video = false;
     } else if (a == "--no-aec") {
