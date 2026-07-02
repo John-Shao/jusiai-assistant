@@ -16,10 +16,10 @@ is no display layer (no LVGL, no framebuffer, no touch).
 与 Android 端「AI 助手」一致,全程走设备 API(`DEVICE_API_KEY` 鉴权):
 
 ```
-connect_room (device API,一次调完:建房 + LiveKit token + 派发 AI Agent)
+start_chat_bot (device API,一次调完:建房 + LiveKit token + 派发 AI Agent)
      → 连 LiveKit → 发布麦克风 + 摄像头
      → 订阅 AI Agent 音频播放 (含 AEC 回声消除)
-     → 挂断 (stop_ai_agent + LiveKit disconnect)
+     → 挂断 (stop_chat_bot:移除助手 + 结束房间 + LiveKit disconnect)
 ```
 
 ## 2. 构建环境
@@ -394,7 +394,7 @@ jusiai-assistant/
     ├── main.cpp
     ├── app_config.*        配置解析
     ├── log.h               日志宏
-    ├── api/                设备 API HTTP 客户端(connect_room + stop_ai_agent)
+    ├── api/                设备 API HTTP 客户端(start_chat_bot + stop_chat_bot)
     ├── rtc/livekit_session.*  LiveKit 会话封装
     ├── media/              V4L2 摄像头、ALSA 音频(含 AEC 接入)
     ├── core/               闭环状态机

@@ -223,10 +223,10 @@ void AssistantController::do_start() {
   //    room, returns LiveKit credentials, and dispatches the AI agent.
   set_state(AssistantState::CreatingRoom, kStatusCreatingRoom, {});
   RoomCredentials creds;
-  LOG_INFO("controller: calling device-api connect_room ...");
-  ApiOutcome o = api_.connect_room(config_.device_id, config_.provider,
-                                   config_.voice, config_.prompt_label, creds);
-  LOG_INFO("controller: connect_room -> ok=%d http=%d %s", o.ok, o.http_status,
+  LOG_INFO("controller: calling device-api start_chat_bot ...");
+  ApiOutcome o = api_.start_chat_bot(config_.device_id, config_.provider,
+                                     config_.voice, config_.prompt_label, creds);
+  LOG_INFO("controller: start_chat_bot -> ok=%d http=%d %s", o.ok, o.http_status,
            o.error.c_str());
   if (!o.ok) {
     teardown(AssistantState::Error, kErrCreateRoom, o.error);
@@ -279,7 +279,7 @@ void AssistantController::do_start() {
     }
   }
 
-  // 4. The AI agent was already dispatched by connect_room (step 1); it joins
+  // 4. The AI agent was already dispatched by start_chat_bot (step 1); it joins
   //    the room and waits for this device participant. Wait for it to come
   //    online, up to the deadline the worker loop enforces.
   set_state(AssistantState::WaitingAgent, kStatusWakingAgent);
@@ -297,7 +297,7 @@ void AssistantController::teardown(AssistantState final_state,
   set_state(AssistantState::Stopping, kStatusEndingCall, {});
 
   if (!room_id_.empty()) {
-    api_.stop_ai_agent(room_id_);  // best effort
+    api_.stop_chat_bot(config_.device_id);  // best effort: remove agent + end room
   }
   audio_.stop_mic();
   camera_.set_publishing(false);

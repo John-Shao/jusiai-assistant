@@ -4,8 +4,8 @@
 // an Authorization: Bearer header — never a user token. The client drives the
 // same closed loop the Android "AI 助手" uses:
 //
-//   connect_room()   POST /device-api/v1.0/rooms/connect/   (room + agent, one call)
-//   stop_ai_agent()  POST /device-api/v1.0/rooms/{id}/stop-ai-agent/
+//   start_chat_bot()  POST /device-api/v1.0/rooms/start-chat-bot/  (room + agent, one call)
+//   stop_chat_bot()   POST /device-api/v1.0/rooms/stop-chat-bot/   (remove agent + end room)
 #pragma once
 
 #include <string>
@@ -26,14 +26,15 @@ class DeviceApiClient {
   // agent. On success fills `out` with the LiveKit connection info needed to
   // join. `provider` may be empty to use the backend default; `voice` /
   // `prompt_label` may be empty to use the provider defaults.
-  ApiOutcome connect_room(const std::string& device_id,
-                          const std::string& provider,
-                          const std::string& voice,
-                          const std::string& prompt_label,
-                          RoomCredentials& out);
+  ApiOutcome start_chat_bot(const std::string& device_id,
+                            const std::string& provider,
+                            const std::string& voice,
+                            const std::string& prompt_label,
+                            RoomCredentials& out);
 
-  // Remove the AI agent from `room_id`.
-  ApiOutcome stop_ai_agent(const std::string& room_id);
+  // End the device's active 1v1 AI session: removes the AI agent and ends the
+  // room. Located by `device_id` (no room id needed); idempotent.
+  ApiOutcome stop_chat_bot(const std::string& device_id);
 
  private:
   // Perform a JSON POST; returns the outcome and, on HTTP 2xx, the body.

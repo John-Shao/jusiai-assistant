@@ -84,11 +84,11 @@ ApiOutcome DeviceApiClient::post_json(const std::string& path,
                              extract_error_message(res->body, res->status));
 }
 
-ApiOutcome DeviceApiClient::connect_room(const std::string& device_id,
-                                         const std::string& provider,
-                                         const std::string& voice,
-                                         const std::string& prompt_label,
-                                         RoomCredentials& out) {
+ApiOutcome DeviceApiClient::start_chat_bot(const std::string& device_id,
+                                           const std::string& provider,
+                                           const std::string& voice,
+                                           const std::string& prompt_label,
+                                           RoomCredentials& out) {
   out = RoomCredentials{};
 
   json req = {{"device_id", device_id}};
@@ -101,13 +101,13 @@ ApiOutcome DeviceApiClient::connect_room(const std::string& device_id,
 
   std::string body;
   ApiOutcome outcome =
-      post_json("/device-api/v1.0/rooms/connect/", req.dump(), body);
+      post_json("/device-api/v1.0/rooms/start-chat-bot/", req.dump(), body);
   if (!outcome.ok) return outcome;
 
+  // Response is minimal: { "id": "...", "livekit": { url, room, token } }.
   try {
     json j = json::parse(body);
     out.room_id = j.value("id", "");
-    out.slug = j.value("slug", "");
     if (j.contains("livekit") && j["livekit"].is_object()) {
       const json& lk = j["livekit"];
       out.livekit_url = lk.value("url", "");
@@ -115,24 +115,24 @@ ApiOutcome DeviceApiClient::connect_room(const std::string& device_id,
     }
   } catch (const std::exception& e) {
     return ApiOutcome::failure(
-        outcome.http_status, std::string("Bad connect response: ") + e.what());
+        outcome.http_status, std::string("Bad start-chat-bot response: ") + e.what());
   }
 
   if (!out.valid()) {
     return ApiOutcome::failure(outcome.http_status,
                                "Incomplete room info from the server");
   }
-  LOG_INFO("device-api: connected room id=%s slug=%s (provider=%s)",
-           out.room_id.c_str(), out.slug.c_str(),
-           provider.empty() ? "default" : provider.c_str());
+  LOG_INFO("device-api: chat bot started room id=%s (provider=%s)",
+           out.room_id.c_str(), provider.empty() ? "default" : provider.c_str());
   return outcome;
 }
 
-ApiOutcome DeviceApiClient::stop_ai_agent(const std::string& room_id) {
+ApiOutcome DeviceApiClient::stop_chat_bot(const std::string& device_id) {
+  json req = {{"device_id", device_id}};
   std::string body;
-  ApiOutcome outcome = post_json(
-      "/device-api/v1.0/rooms/" + room_id + "/stop-ai-agent/", "{}", body);
-  if (outcome.ok) LOG_INFO("device-api: AI agent stopped");
+  ApiOutcome outcome =
+      post_json("/device-api/v1.0/rooms/stop-chat-bot/", req.dump(), body);
+  if (outcome.ok) LOG_INFO("device-api: chat bot stopped");
   return outcome;
 }
 
