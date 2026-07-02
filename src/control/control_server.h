@@ -9,6 +9,8 @@
 //   POST /stop              end the AI call
 //   POST /mic     {muted}   set microphone mute on/off
 //   POST /camera  {enabled} set camera on/off
+//   GET  /config            current AI profile/voice/prompt config
+//   POST /config            update AI profile/voice/prompt config and persist
 //   GET  /status            current state as JSON
 //   GET  /events            Server-Sent Events stream of state changes
 //   GET  /healthz           liveness probe

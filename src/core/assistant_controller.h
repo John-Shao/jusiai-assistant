@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -70,6 +71,12 @@ class AssistantController {
   void request_set_mic_muted(bool muted);
   void request_set_camera_muted(bool muted);
 
+  // Runtime AI-agent settings changed through the local control API.
+  // The update is applied immediately; if a conversation is active the worker
+  // restarts it so the next backend start-chat-bot call uses the new values.
+  bool set_agent_config(const AppConfig& config);
+  AppConfig config_snapshot() const;
+
   // Thread-safe snapshot for the control API to serve as JSON.
   UiSnapshot snapshot() const;
 
@@ -81,6 +88,7 @@ class AssistantController {
     CmdToggleCamera,
     CmdSetMute,
     CmdSetCamera,
+    CmdRestart,
     CmdQuit,
     EvAgentOnline,
     EvAgentOffline,
@@ -90,10 +98,12 @@ class AssistantController {
     EventType type;
     std::string text;
     bool flag = false;  // payload for CmdSetMute / CmdSetCamera
+    std::uint64_t generation = 0;  // LiveKit session generation for callbacks
   };
 
   void worker_loop();
-  void post(EventType type, std::string text = {}, bool flag = false);
+  void post(EventType type, std::string text = {}, bool flag = false,
+            std::uint64_t generation = 0);
   void handle(const Event& ev);
 
   // Closed-loop steps (worker thread only).
@@ -107,6 +117,7 @@ class AssistantController {
   AssistantState current_state() const;
 
   AppConfig config_;
+  mutable std::mutex config_mutex_;
   DeviceApiClient api_;
 
   AudioEngine audio_;
@@ -114,6 +125,7 @@ class AssistantController {
 
   std::unique_ptr<LiveKitSession> session_;  // worker thread only
   std::string room_id_;                      // worker thread only
+  std::uint64_t session_generation_ = 0;      // worker thread only
 
   // Worker thread + event queue.
   std::thread worker_;

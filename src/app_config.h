@@ -21,7 +21,9 @@ struct AppConfig {
   // --- AI agent ---
   std::string provider = "doubao";               // doubao | doubao_s2s | qwen
   std::string voice;                            // empty -> provider default
+  std::string prompt_id;                        // preferred v2 prompt selector
   std::string prompt_label = "通用 AI 助手";
+  std::string prompt_content;                   // optional custom prompt text
 
   // --- Media ---
   // camera_width/height are the OUTPUT (post-rotation) resolution. The
@@ -66,6 +68,11 @@ struct AppConfig {
 // On --help or a parse error, prints to stderr; `should_exit` is set and
 // `exit_code` carries the process exit status the caller should use.
 AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code);
+
+// Persist the runtime-selectable AI agent settings changed through the local
+// control API. These overrides are loaded after the config file and before
+// environment variables / command-line flags.
+bool save_runtime_agent_config(const AppConfig& cfg, std::string* error);
 
 // Return a stable device id. When `configured` is empty, derive one from
 // the SoC eFuse serial (via /proc/cpuinfo "Serial") as `JUSI-<serial>` —

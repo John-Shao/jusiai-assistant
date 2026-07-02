@@ -83,6 +83,39 @@ void AssistantController::request_set_camera_muted(bool muted) {
   post(EventType::CmdSetCamera, {}, muted);
 }
 
+bool AssistantController::set_agent_config(const AppConfig& config) {
+  {
+    std::lock_guard<std::mutex> lock(config_mutex_);
+    config_.provider = config.provider;
+    config_.voice = config.voice;
+    config_.prompt_id = config.prompt_id;
+    config_.prompt_label = config.prompt_label;
+    config_.prompt_content = config.prompt_content;
+  }
+
+  LOG_INFO("controller: agent config updated profile=%s voice=%s prompt_id=%s "
+           "prompt_label=%s",
+           config.provider.empty() ? "default" : config.provider.c_str(),
+           config.voice.empty() ? "default" : config.voice.c_str(),
+           config.prompt_id.empty() ? "<none>" : config.prompt_id.c_str(),
+           config.prompt_label.empty() ? "<none>" : config.prompt_label.c_str());
+
+  const AssistantState state = current_state();
+  if (state == AssistantState::CreatingRoom ||
+      state == AssistantState::Connecting ||
+      state == AssistantState::WaitingAgent ||
+      state == AssistantState::InCall) {
+    post(EventType::CmdRestart);
+    return true;
+  }
+  return false;
+}
+
+AppConfig AssistantController::config_snapshot() const {
+  std::lock_guard<std::mutex> lock(config_mutex_);
+  return config_;
+}
+
 UiSnapshot AssistantController::snapshot() const {
   UiSnapshot s;
   {
@@ -100,10 +133,11 @@ UiSnapshot AssistantController::snapshot() const {
 
 // --- Worker thread -------------------------------------------------------
 
-void AssistantController::post(EventType type, std::string text, bool flag) {
+void AssistantController::post(EventType type, std::string text, bool flag,
+                               std::uint64_t generation) {
   {
     std::lock_guard<std::mutex> lock(queue_mutex_);
-    queue_.push_back(Event{type, std::move(text), flag});
+    queue_.push_back(Event{type, std::move(text), flag, generation});
   }
   queue_cv_.notify_one();
 }
@@ -145,6 +179,15 @@ void AssistantController::worker_loop() {
 
 void AssistantController::handle(const Event& ev) {
   const AssistantState state = current_state();
+  if ((ev.type == EventType::EvAgentOnline ||
+       ev.type == EventType::EvAgentOffline ||
+       ev.type == EventType::EvDisconnected) &&
+      ev.generation != session_generation_) {
+    LOG_DEBUG("controller: ignoring stale session event type=%d generation=%llu",
+              static_cast<int>(ev.type),
+              static_cast<unsigned long long>(ev.generation));
+    return;
+  }
 
   switch (ev.type) {
     case EventType::CmdStart:
@@ -188,6 +231,17 @@ void AssistantController::handle(const Event& ev) {
       LOG_INFO("controller: camera %s", ev.flag ? "off" : "on");
       break;
 
+    case EventType::CmdRestart:
+      if (state == AssistantState::CreatingRoom ||
+          state == AssistantState::Connecting ||
+          state == AssistantState::WaitingAgent ||
+          state == AssistantState::InCall) {
+        LOG_INFO("controller: restarting conversation for updated agent config");
+        teardown(AssistantState::Idle, kStatusReady, kHintWaiting);
+        do_start();
+      }
+      break;
+
     case EventType::EvAgentOnline:
       if (state == AssistantState::WaitingAgent) {
         set_state(AssistantState::InCall, kStatusListening);
@@ -224,8 +278,10 @@ void AssistantController::do_start() {
   set_state(AssistantState::CreatingRoom, kStatusCreatingRoom, {});
   RoomCredentials creds;
   LOG_INFO("controller: calling device-api start_chat_bot ...");
-  ApiOutcome o = api_.start_chat_bot(config_.device_id, config_.provider,
-                                     config_.voice, config_.prompt_label, creds);
+  const AppConfig cfg = config_snapshot();
+  ApiOutcome o = api_.start_chat_bot(cfg.device_id, cfg.provider, cfg.voice,
+                                     cfg.prompt_id, cfg.prompt_label,
+                                     cfg.prompt_content, creds);
   LOG_INFO("controller: start_chat_bot -> ok=%d http=%d %s", o.ok, o.http_status,
            o.error.c_str());
   if (!o.ok) {
@@ -239,15 +295,18 @@ void AssistantController::do_start() {
   // 2. Join the LiveKit room.
   set_state(AssistantState::Connecting, kStatusConnecting);
   session_ = std::make_unique<LiveKitSession>();
+  const std::uint64_t generation = ++session_generation_;
 
   LiveKitSession::Callbacks cb;
-  cb.on_disconnected = [this](const std::string& reason) {
-    post(EventType::EvDisconnected, reason);
+  cb.on_disconnected = [this, generation](const std::string& reason) {
+    post(EventType::EvDisconnected, reason, false, generation);
   };
-  cb.on_agent_online = [this](const std::string&) {
-    post(EventType::EvAgentOnline);
+  cb.on_agent_online = [this, generation](const std::string&) {
+    post(EventType::EvAgentOnline, {}, false, generation);
   };
-  cb.on_agent_offline = [this] { post(EventType::EvAgentOffline); };
+  cb.on_agent_offline = [this, generation] {
+    post(EventType::EvAgentOffline, {}, false, generation);
+  };
   cb.on_agent_audio = [this](const std::int16_t* s, int spc, int sr, int ch) {
     audio_.play_agent_audio(s, spc, sr, ch);
   };
@@ -271,7 +330,7 @@ void AssistantController::do_start() {
   mic_muted_.store(false);
   cam_muted_.store(false);
 
-  if (config_.publish_video) {
+  if (cfg.publish_video) {
     if (session_->publish_video(camera_.video_source())) {
       camera_.set_publishing(true);
     } else {
@@ -297,7 +356,8 @@ void AssistantController::teardown(AssistantState final_state,
   set_state(AssistantState::Stopping, kStatusEndingCall, {});
 
   if (!room_id_.empty()) {
-    api_.stop_chat_bot(config_.device_id);  // best effort: remove agent + end room
+    const AppConfig cfg = config_snapshot();
+    api_.stop_chat_bot(cfg.device_id);  // best effort: remove agent + end room
   }
   audio_.stop_mic();
   camera_.set_publishing(false);

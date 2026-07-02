@@ -85,18 +85,24 @@ ApiOutcome DeviceApiClient::post_json(const std::string& path,
 }
 
 ApiOutcome DeviceApiClient::start_chat_bot(const std::string& device_id,
-                                           const std::string& provider,
+                                           const std::string& profile_code,
                                            const std::string& voice,
+                                           const std::string& prompt_id,
                                            const std::string& prompt_label,
+                                           const std::string& prompt_content,
                                            RoomCredentials& out) {
   out = RoomCredentials{};
 
   // Flat field layout: AI settings sit at the top level (no nested "config").
   // The provider is sent as `profile_code` (ai-agent-config-v2's profiles[].code).
   json req = {{"device_id", device_id}};
-  if (!provider.empty()) req["profile_code"] = provider;
+  if (!profile_code.empty()) req["profile_code"] = profile_code;
   if (!voice.empty()) req["voice"] = voice;
-  if (!prompt_label.empty()) req["prompt_label"] = prompt_label;
+  if (!prompt_id.empty()) req["prompt_id"] = prompt_id;
+  if (!prompt_content.empty()) req["prompt_content"] = prompt_content;
+  if (!prompt_label.empty() && (prompt_id.empty() || !prompt_content.empty())) {
+    req["prompt_label"] = prompt_label;
+  }
 
   std::string body;
   ApiOutcome outcome =
@@ -121,8 +127,9 @@ ApiOutcome DeviceApiClient::start_chat_bot(const std::string& device_id,
     return ApiOutcome::failure(outcome.http_status,
                                "Incomplete room info from the server");
   }
-  LOG_INFO("device-api: chat bot started room id=%s (provider=%s)",
-           out.room_id.c_str(), provider.empty() ? "default" : provider.c_str());
+  LOG_INFO("device-api: chat bot started room id=%s (profile=%s)",
+           out.room_id.c_str(),
+           profile_code.empty() ? "default" : profile_code.c_str());
   return outcome;
 }
 

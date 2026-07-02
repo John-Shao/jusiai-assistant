@@ -87,14 +87,25 @@ int main(int argc, char** argv) {
       LOG_ERROR("failed to initialise the assistant controller");
       result = 1;
     } else {
-      // Local HTTP control + status API — the only way to drive the device.
-      std::unique_ptr<ControlServer> control =
-          std::make_unique<ControlServer>(&controller, config);
-      if (!control->start()) {
-        LOG_ERROR("control API failed to start — the device would be "
-                  "uncontrollable");
-        result = 1;
+      // Local HTTP control + status API — the normal way to drive the device.
+      std::unique_ptr<ControlServer> control;
+      if (config.control_port > 0) {
+        control = std::make_unique<ControlServer>(&controller, config);
+        if (!control->start()) {
+          LOG_ERROR("control API failed to start — the device would be "
+                    "uncontrollable");
+          result = 1;
+        }
       } else {
+        LOG_INFO("control API disabled by control_port=%d",
+                 config.control_port);
+        if (!config.autostart) {
+          LOG_WARN("control API is disabled and autostart is off; no local "
+                   "start command will be available");
+        }
+      }
+
+      if (result == 0) {
         if (config.autostart) {
           LOG_INFO("autostart: beginning the AI call");
           controller.request_start();

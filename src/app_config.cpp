@@ -10,7 +10,10 @@
 #include <random>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
+
 namespace fs = std::filesystem;
+using json = nlohmann::json;
 
 namespace jusiai {
 namespace {
@@ -65,6 +68,10 @@ std::string home_dir() {
 
 fs::path config_root() { return fs::path(home_dir()) / ".config" / "jusiai-assistant"; }
 
+fs::path runtime_agent_config_path() {
+  return config_root() / "agent_config.json";
+}
+
 // Apply a single key/value pair to the config.
 void apply_kv(AppConfig& cfg, const std::string& key, const std::string& value) {
   const std::string v = trim(value);
@@ -76,12 +83,16 @@ void apply_kv(AppConfig& cfg, const std::string& key, const std::string& value) 
     cfg.tls_verify = parse_bool(v, cfg.tls_verify);
   } else if (key == "device_id") {
     cfg.device_id = v;
-  } else if (key == "provider") {
+  } else if (key == "provider" || key == "profile_code") {
     if (!v.empty()) cfg.provider = v;
   } else if (key == "voice") {
     cfg.voice = v;
+  } else if (key == "prompt_id") {
+    cfg.prompt_id = v;
   } else if (key == "prompt_label") {
     cfg.prompt_label = v;
+  } else if (key == "prompt_content") {
+    cfg.prompt_content = v;
   } else if (key == "camera_width") {
     cfg.camera_width = parse_int(v, cfg.camera_width);
   } else if (key == "camera_height") {
@@ -133,6 +144,34 @@ bool load_config_file(AppConfig& cfg, const fs::path& path) {
   return true;
 }
 
+void load_runtime_agent_config(AppConfig& cfg) {
+  const fs::path path = runtime_agent_config_path();
+  std::ifstream in(path);
+  if (!in.is_open()) return;
+
+  try {
+    json j = json::parse(in);
+    if (!j.is_object()) return;
+    LOG_INFO("config: loading runtime agent config %s", path.string().c_str());
+
+    if (j.contains("profile_code") && j["profile_code"].is_string()) {
+      cfg.provider = j["profile_code"].get<std::string>();
+    }
+    if (j.contains("provider") && j["provider"].is_string()) {
+      cfg.provider = j["provider"].get<std::string>();
+    }
+    if (j.contains("voice") && j["voice"].is_string()) {
+      cfg.voice = j["voice"].get<std::string>();
+    }
+    if (j.contains("prompt_id") && j["prompt_id"].is_string()) {
+      cfg.prompt_id = j["prompt_id"].get<std::string>();
+    }
+  } catch (const std::exception& e) {
+    LOG_WARN("config: ignoring bad runtime agent config %s: %s",
+             path.string().c_str(), e.what());
+  }
+}
+
 void apply_env(AppConfig& cfg) {
   struct EnvKey {
     const char* env;
@@ -143,8 +182,11 @@ void apply_env(AppConfig& cfg) {
       {"JUSIAI_DEVICE_API_KEY", "device_api_key"},
       {"JUSIAI_DEVICE_ID", "device_id"},
       {"JUSIAI_PROVIDER", "provider"},
+      {"JUSIAI_PROFILE_CODE", "profile_code"},
       {"JUSIAI_VOICE", "voice"},
+      {"JUSIAI_PROMPT_ID", "prompt_id"},
       {"JUSIAI_PROMPT_LABEL", "prompt_label"},
+      {"JUSIAI_PROMPT_CONTENT", "prompt_content"},
       {"JUSIAI_AUTOSTART", "autostart"},
       {"JUSIAI_CONTROL_BIND", "control_bind"},
       {"JUSIAI_CONTROL_PORT", "control_port"},
@@ -165,8 +207,11 @@ void print_usage(const char* prog) {
       "  --device-api-key <k>   Device API pre-shared key\n"
       "  --device-id <id>       Device identifier (default: auto-generated)\n"
       "  --provider <p>         AI provider: doubao | doubao_s2s | qwen\n"
+      "  --profile-code <p>     AI profile code (alias for --provider)\n"
       "  --voice <voice>        AI output voice\n"
+      "  --prompt-id <id>       Prompt id from ai-agent-config-v2\n"
       "  --prompt-label <name>  AI assistant persona label\n"
+      "  --prompt-content <txt> Custom prompt content\n"
       "  --no-video             Do not publish the local camera track\n"
       "  --no-aec               Disable acoustic echo cancellation\n"
       "  --aec-delay <ms>       Echo-canceller speaker->mic delay hint (ms)\n"
@@ -192,6 +237,35 @@ std::string AppConfig::summary() const {
     os << " control=disabled";
   }
   return os.str();
+}
+
+bool save_runtime_agent_config(const AppConfig& cfg, std::string* error) {
+  const fs::path path = runtime_agent_config_path();
+  std::error_code ec;
+  fs::create_directories(path.parent_path(), ec);
+  if (ec) {
+    if (error) *error = "cannot create config directory: " + ec.message();
+    return false;
+  }
+
+  json j = {
+      {"profile_code", cfg.provider},
+      {"voice", cfg.voice},
+      {"prompt_id", cfg.prompt_id},
+  };
+
+  std::ofstream out(path);
+  if (!out.is_open()) {
+    if (error) *error = "cannot open " + path.string() + " for writing";
+    return false;
+  }
+  out << j.dump(2) << "\n";
+  if (!out.good()) {
+    if (error) *error = "failed to write " + path.string();
+    return false;
+  }
+  LOG_INFO("config: saved runtime agent config %s", path.string().c_str());
+  return true;
 }
 
 std::string resolve_device_id(const std::string& configured) {
@@ -283,6 +357,9 @@ AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code) 
     }
   }
 
+  // Layer: runtime agent config persisted by the local control API.
+  load_runtime_agent_config(cfg);
+
   // Layer: environment.
   apply_env(cfg);
 
@@ -307,12 +384,16 @@ AppConfig load_config(int argc, char** argv, bool& should_exit, int& exit_code) 
       if (const char* v = next(i)) cfg.device_api_key = v;
     } else if (a == "--device-id") {
       if (const char* v = next(i)) cfg.device_id = v;
-    } else if (a == "--provider") {
+    } else if (a == "--provider" || a == "--profile-code") {
       if (const char* v = next(i)) cfg.provider = v;
     } else if (a == "--voice") {
       if (const char* v = next(i)) cfg.voice = v;
+    } else if (a == "--prompt-id") {
+      if (const char* v = next(i)) cfg.prompt_id = v;
     } else if (a == "--prompt-label") {
       if (const char* v = next(i)) cfg.prompt_label = v;
+    } else if (a == "--prompt-content") {
+      if (const char* v = next(i)) cfg.prompt_content = v;
     } else if (a == "--no-video") {
       cfg.publish_video = false;
     } else if (a == "--no-aec") {

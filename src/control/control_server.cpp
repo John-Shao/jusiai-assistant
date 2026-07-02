@@ -46,6 +46,17 @@ std::string snapshot_json(const UiSnapshot& s) {
   return j.dump();
 }
 
+json agent_config_json(const AppConfig& cfg) {
+  return {
+      {"profile_code", cfg.provider},
+      {"provider", cfg.provider},
+      {"voice", cfg.voice},
+      {"prompt_id", cfg.prompt_id},
+      {"prompt_label", cfg.prompt_label},
+      {"prompt_content", cfg.prompt_content},
+  };
+}
+
 bool snapshots_differ(const UiSnapshot& a, const UiSnapshot& b) {
   return a.state != b.state || a.status != b.status || a.detail != b.detail ||
          a.mic_muted != b.mic_muted || a.cam_muted != b.cam_muted ||
@@ -76,6 +87,133 @@ int read_bool_arg(const httplib::Request& req, const char* name) {
     }
   }
   return -1;
+}
+
+bool assign_string_value(const json& v, std::string* out,
+                         const std::string& name, std::string* error) {
+  if (v.is_null()) {
+    out->clear();
+    return true;
+  }
+  if (v.is_string()) {
+    *out = v.get<std::string>();
+    return true;
+  }
+  *error = "'" + name + "' must be a string or null";
+  return false;
+}
+
+bool assign_object_string(const json& obj, const char* field,
+                          std::string* out, const std::string& name,
+                          std::string* error, bool* changed) {
+  if (!obj.contains(field)) return true;
+  if (!assign_string_value(obj[field], out, name + "." + field, error)) {
+    return false;
+  }
+  *changed = true;
+  return true;
+}
+
+bool parse_agent_config_update(const httplib::Request& req, AppConfig* cfg,
+                               std::string* error) {
+  if (req.body.empty()) {
+    *error = "missing JSON body";
+    return false;
+  }
+
+  json body;
+  try {
+    body = json::parse(req.body);
+  } catch (const std::exception& e) {
+    *error = std::string("invalid JSON: ") + e.what();
+    return false;
+  }
+  if (!body.is_object()) {
+    *error = "JSON body must be an object";
+    return false;
+  }
+
+  bool changed = false;
+  if (body.contains("profile_code")) {
+    if (!assign_string_value(body["profile_code"], &cfg->provider,
+                             "profile_code", error)) return false;
+    changed = true;
+  }
+  if (body.contains("provider")) {
+    if (!assign_string_value(body["provider"], &cfg->provider,
+                             "provider", error)) return false;
+    changed = true;
+  }
+  if (body.contains("profile")) {
+    const json& p = body["profile"];
+    if (p.is_object()) {
+      if (!assign_object_string(p, "code", &cfg->provider, "profile", error,
+                                &changed)) {
+        return false;
+      }
+    } else {
+      if (!assign_string_value(p, &cfg->provider, "profile", error)) {
+        return false;
+      }
+      changed = true;
+    }
+  }
+
+  if (body.contains("voice")) {
+    const json& v = body["voice"];
+    if (v.is_object()) {
+      if (!assign_object_string(v, "value", &cfg->voice, "voice", error,
+                                &changed)) {
+        return false;
+      }
+    } else {
+      if (!assign_string_value(v, &cfg->voice, "voice", error)) return false;
+      changed = true;
+    }
+  }
+
+  if (body.contains("prompt")) {
+    const json& p = body["prompt"];
+    if (!p.is_object()) {
+      *error = "'prompt' must be an object";
+      return false;
+    }
+    if (!assign_object_string(p, "id", &cfg->prompt_id, "prompt", error,
+                              &changed)) {
+      return false;
+    }
+    if (!assign_object_string(p, "label", &cfg->prompt_label, "prompt",
+                              error, &changed)) {
+      return false;
+    }
+    if (!assign_object_string(p, "content", &cfg->prompt_content, "prompt",
+                              error, &changed)) {
+      return false;
+    }
+  }
+
+  if (body.contains("prompt_id")) {
+    if (!assign_string_value(body["prompt_id"], &cfg->prompt_id, "prompt_id",
+                             error)) return false;
+    changed = true;
+  }
+  if (body.contains("prompt_label")) {
+    if (!assign_string_value(body["prompt_label"], &cfg->prompt_label,
+                             "prompt_label", error)) return false;
+    changed = true;
+  }
+  if (body.contains("prompt_content")) {
+    if (!assign_string_value(body["prompt_content"], &cfg->prompt_content,
+                             "prompt_content", error)) return false;
+    changed = true;
+  }
+
+  if (!changed) {
+    *error = "no supported fields; expected profile_code/provider/profile, "
+             "voice, prompt_id, prompt_label, prompt_content or prompt";
+    return false;
+  }
+  return true;
 }
 
 }  // namespace
@@ -179,6 +317,36 @@ bool ControlServer::start() {
     LOG_INFO("control: POST /camera enabled=%d", enabled);
     controller_->request_set_camera_muted(enabled == 0);
     ok_json(res);
+  });
+
+  server_->Get("/config", [this](const httplib::Request&,
+                                 httplib::Response& res) {
+    res.set_content(agent_config_json(controller_->config_snapshot()).dump(),
+                    "application/json");
+  });
+
+  server_->Post("/config", [this, bad_request](const httplib::Request& req,
+                                               httplib::Response& res) {
+    AppConfig cfg = controller_->config_snapshot();
+    std::string error;
+    if (!parse_agent_config_update(req, &cfg, &error)) {
+      bad_request(res, error);
+      return;
+    }
+
+    if (!save_runtime_agent_config(cfg, &error)) {
+      res.status = 500;
+      res.set_content(json({{"ok", false}, {"error", error}}).dump(),
+                      "application/json");
+      return;
+    }
+
+    const bool restart_queued = controller_->set_agent_config(cfg);
+    res.set_content(json({{"ok", true},
+                          {"restart_queued", restart_queued},
+                          {"config", agent_config_json(cfg)}})
+                        .dump(),
+                    "application/json");
   });
 
   server_->Get("/status", [this](const httplib::Request&,
