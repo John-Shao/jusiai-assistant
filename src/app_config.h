@@ -51,9 +51,11 @@ struct AppConfig {
   bool autostart = false;
 
   // Local HTTP control + status API — the only way to drive the device.
-  // Bind to 0.0.0.0 for phone/remote direct control; keep 127.0.0.1 when a
-  // sibling voice/phone module on the same device is the client.
-  std::string control_bind = "127.0.0.1";
+  // Default 0.0.0.0 so a phone / remote on the LAN can connect directly.
+  // Set to 127.0.0.1 to restrict access to sibling voice / phone modules
+  // running on this device. The API has no auth — on 0.0.0.0 anyone on the
+  // LAN can drive the device, so use trusted home WiFi only.
+  std::string control_bind = "0.0.0.0";
   int control_port = 8765;
 
   LogLevel log_level = LogLevel::Info;

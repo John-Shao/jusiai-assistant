@@ -76,7 +76,7 @@ cd /opt/jusiai && ./run.sh --autostart     # 启动即自动发起 AI 通话
 
 ### 4.1 控制 API
 
-控制 API 由启动的应用监听在 `control_bind:control_port`(默认 `127.0.0.1:8765`)。
+控制 API 由启动的应用监听在 `control_bind:control_port`(默认 `0.0.0.0:8765`)。
 无状态 HTTP,每条命令一个请求。
 
 | 方法 / 路径 | 作用 | 参数 |
@@ -117,18 +117,19 @@ cd /opt/jusiai && ./run.sh --autostart     # 启动即自动发起 AI 通话
 部分 AI 陪伴产品里系统只预置 jusiai-assistant、没有兄弟模块,手机 / 遥控器直接连
 控制 API 操控。接口与状态字段同 §4.1,差别只在**绑定地址**这一点。
 
-**让 API 可被直连。** 控制 API 默认只绑 `127.0.0.1`,手机连不上 —— 直连场景必须让
-它监听局域网地址:
-
-| 方式 | 设置 |
-|------|------|
-| 命令行 | `./run.sh --control-bind 0.0.0.0` |
-| 配置文件 | `control_bind = 0.0.0.0` |
-| 环境变量 | `JUSIAI_CONTROL_BIND=0.0.0.0` |
-
+**API 默认就绑 `0.0.0.0`**,同一局域网的手机 / 遥控器可以直接访问,不用改配置。
 启动日志会打印 `control: HTTP control API listening on 0.0.0.0:8765`。手机 / 遥控器
 的访问地址即 `http://<设备局域网IP>:8765`;设备 IP 需自行获知(静态 IP / 路由器
 DHCP 绑定 / 手动输入,程序未内置 mDNS 发现)。
+
+如果这台设备上另有兄弟模块(语音识别 / 手机协议)在同机调用控制 API,想把它限制
+成"只允许本机访问",可以显式改回:
+
+| 方式 | 设置 |
+|------|------|
+| 命令行 | `./run.sh --control-bind 127.0.0.1` |
+| 配置文件 | `control_bind = 127.0.0.1` |
+| 环境变量 | `JUSIAI_CONTROL_BIND=127.0.0.1` |
 
 **完整 curl 示例**(接口和状态字段的含义见 §4.1):
 
@@ -278,7 +279,7 @@ es.addEventListener('status', e => {      // 注意:不是 onmessage
 | `audio_aec` / `--no-aec` | 回声消除(扬声器与麦克风共用全双工编解码器,默认开,见 §7.5)| `true` |
 | `audio_aec_delay_ms` / `--aec-delay` | 回声消除的扬声器→麦克风延迟估计(ms)| `90` |
 | `autostart` / `--autostart` | 启动即发起通话 | `false` |
-| `control_bind` / `--control-bind` | 控制 API 绑定地址(直连手机用 `0.0.0.0`,见 §4.2)| `127.0.0.1` |
+| `control_bind` / `--control-bind` | 控制 API 绑定地址(默认允许局域网直连,设 `127.0.0.1` 限制到本机,见 §4.2)| `0.0.0.0` |
 | `control_port` / `--control-port` | 控制 API 端口(`0` 关闭 API)| `8765` |
 
 TLS:板上 Buildroot rootfs 无系统 CA 库,应用启动时会自动把 `SSL_CERT_FILE`
