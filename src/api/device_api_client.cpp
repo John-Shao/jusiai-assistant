@@ -91,13 +91,12 @@ ApiOutcome DeviceApiClient::start_chat_bot(const std::string& device_id,
                                            RoomCredentials& out) {
   out = RoomCredentials{};
 
+  // Flat field layout: AI settings sit at the top level (no nested "config").
+  // The provider is sent as `profile_code` (ai-agent-config-v2's profiles[].code).
   json req = {{"device_id", device_id}};
-  if (!provider.empty()) req["provider"] = provider;
-
-  json config = json::object();
-  if (!voice.empty()) config["voice"] = voice;
-  if (!prompt_label.empty()) config["prompt_label"] = prompt_label;
-  if (!config.empty()) req["config"] = config;
+  if (!provider.empty()) req["profile_code"] = provider;
+  if (!voice.empty()) req["voice"] = voice;
+  if (!prompt_label.empty()) req["prompt_label"] = prompt_label;
 
   std::string body;
   ApiOutcome outcome =
