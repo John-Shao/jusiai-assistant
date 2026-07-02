@@ -24,8 +24,9 @@ class DeviceApiClient {
   // Set up a 1v1 AI session in a single call: the backend get-or-creates the
   // device's anonymous room, mints a LiveKit join token, and dispatches the AI
   // agent. On success fills `out` with the LiveKit connection info needed to
-  // join. `provider` may be empty to use the backend default; `voice` /
-  // `prompt_label` may be empty to use the provider defaults.
+  // join. `provider` may be empty to use the backend default; `voice` selects
+  // the output voice; `voice` / `prompt_label` may be empty to use the
+  // provider defaults.
   ApiOutcome start_chat_bot(const std::string& device_id,
                             const std::string& provider,
                             const std::string& voice,

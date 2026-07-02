@@ -165,7 +165,7 @@ void print_usage(const char* prog) {
       "  --device-api-key <k>   Device API pre-shared key\n"
       "  --device-id <id>       Device identifier (default: auto-generated)\n"
       "  --provider <p>         AI provider: doubao | doubao_s2s | qwen\n"
-      "  --voice <id>           AI output voice id\n"
+      "  --voice <voice>        AI output voice\n"
       "  --prompt-label <name>  AI assistant persona label\n"
       "  --no-video             Do not publish the local camera track\n"
       "  --no-aec               Disable acoustic echo cancellation\n"
