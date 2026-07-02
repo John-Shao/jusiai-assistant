@@ -67,12 +67,22 @@ cd /opt/jusiai && ./run.sh                 # 起来后等控制 API 指令
 cd /opt/jusiai && ./run.sh --autostart     # 启动即自动发起 AI 通话
 ```
 
+需要 SSH 断开后进程仍保持运行(在板子上远程调试完想让它继续跑),用 `nohup` +
+`disown`,并把日志重定向到文件:
+
+```bash
+cd /opt/jusiai && nohup ./run.sh > /tmp/jusiai.log 2>&1 &
+disown
+tail -f /tmp/jusiai.log                    # 跟踪日志
+```
+
 `run.sh` 会先按正确顺序停掉板载出厂摄像头固件栈(`watchdog_d` / `camera_ui_d` /
 `camera_core_d`,详见 §7.1),再启动 `rkaiq_3A_server` 接管 ISP 3A,最后启动应用。
 可执行文件 RPATH 为 `$ORIGIN`,`liblivekit*.so` 与 `ca-certificates.crt` 须与
 可执行文件同目录(部署目录已包含)。
 
-退出:`Ctrl-C` 或 `kill -INT`。
+退出:前台跑按 `Ctrl-C`;后台跑用 `kill -TERM $(pidof jusiai-assistant)`。
+SIGINT / SIGTERM 都会触发优雅收尾(挂断当前通话、断开 LiveKit、释放 ALSA / V4L2)。
 
 ### 4.1 控制 API
 
