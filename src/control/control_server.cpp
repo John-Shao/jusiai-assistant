@@ -301,15 +301,19 @@ bool ControlServer::start() {
 
   server_->Get("/config", [this](const httplib::Request&,
                                  httplib::Response& res) {
-    res.set_content(agent_config_json(controller_->config_snapshot()).dump(),
-                    "application/json");
+    const std::string body =
+        agent_config_json(controller_->config_snapshot()).dump();
+    LOG_INFO("control: GET /config -> %s", body.c_str());
+    res.set_content(body, "application/json");
   });
 
   server_->Post("/config", [this, bad_request](const httplib::Request& req,
                                                httplib::Response& res) {
+    LOG_INFO("control: POST /config body: %s", req.body.c_str());
     AppConfig cfg = controller_->config_snapshot();
     std::string error;
     if (!parse_agent_config_update(req, &cfg, &error)) {
+      LOG_WARN("control: POST /config rejected: %s", error.c_str());
       bad_request(res, error);
       return;
     }
@@ -326,6 +330,8 @@ bool ControlServer::start() {
     }
 
     const bool restart_queued = controller_->set_agent_config(cfg);
+    LOG_INFO("control: POST /config applied -> %s (restart_queued=%d)",
+             agent_config_json(cfg).dump().c_str(), restart_queued);
     res.set_content(json({{"ok", true},
                           {"restart_queued", restart_queued},
                           {"config", agent_config_json(cfg)}})
