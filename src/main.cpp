@@ -64,8 +64,8 @@ void wait_for_signal() {
 
 enum class FirstStartOutcome {
   Success,        // reached InCall
-  ServerRejected, // reached Error and the last start_chat_bot was HTTP 4xx
-  Other,          // Error with non-4xx status, or timeout / quit
+  ServerRejected, // reached Error and start_chat_bot was HTTP 400 (bad agent config)
+  Other,          // Error with any other status, or timeout / quit
 };
 
 // Watch the controller's snapshot until autostart's very first start attempt
@@ -79,10 +79,13 @@ FirstStartOutcome wait_first_start(const jusiai::AssistantController& c) {
       return FirstStartOutcome::Success;
     }
     if (s.state == jusiai::AssistantState::Error) {
+      // Only HTTP 400 means the persisted agent config itself was rejected
+      // (serializer validation). 401/403 (device key / binding) and 429
+      // (quota) are not agent-config problems, so quarantining and retrying
+      // with defaults would not help — surface those normally instead.
       const int http = c.last_start_http_status();
-      return (http >= 400 && http < 500)
-                 ? FirstStartOutcome::ServerRejected
-                 : FirstStartOutcome::Other;
+      return (http == 400) ? FirstStartOutcome::ServerRejected
+                           : FirstStartOutcome::Other;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
   }

@@ -24,9 +24,22 @@ constexpr const char* kHintTryAgain       = "请重试";
 constexpr const char* kErrDisconnected    = "连接已断开";
 constexpr const char* kHintConnectionLost = "网络连接已丢失";
 constexpr const char* kErrCreateRoom      = "无法创建房间";
+constexpr const char* kErrDeviceAuth      = "设备认证失败";
+constexpr const char* kErrQuota           = "使用配额已用尽";
 constexpr const char* kErrConnect         = "无法连接";
 constexpr const char* kHintMediaServer    = "无法连接到媒体服务器";
 constexpr const char* kErrPublishAudio    = "无法发布音频";
+
+// Map a start-chat-bot failure HTTP status to a user-facing state label.
+// 401/403 => device key / device_id binding problem (config, not transient);
+// 429 => usage quota exhausted (transient, resets with the quota window);
+// anything else => generic "cannot create room". The backend's own message is
+// carried separately as the Error detail.
+const char* start_error_label(int http_status) {
+  if (http_status == 401 || http_status == 403) return kErrDeviceAuth;
+  if (http_status == 429) return kErrQuota;
+  return kErrCreateRoom;
+}
 
 }  // namespace
 
@@ -281,7 +294,7 @@ void AssistantController::do_start() {
   LOG_INFO("controller: start_chat_bot -> ok=%d http=%d %s", o.ok, o.http_status,
            o.error.c_str());
   if (!o.ok) {
-    teardown(AssistantState::Error, kErrCreateRoom, o.error);
+    teardown(AssistantState::Error, start_error_label(o.http_status), o.error);
     return;
   }
   room_id_ = creds.room_id;
