@@ -67,11 +67,17 @@ ApiOutcome DeviceApiClient::post_json(const std::string& path,
 
   httplib::Headers headers = {{"Authorization", auth_header_}};
   LOG_DEBUG("device-api: POST %s%s", base_url_.c_str(), path.c_str());
+  LOG_INFO("device-api: request  body: %s", body.c_str());
 
   httplib::Result res = cli.Post(path, headers, body, "application/json");
   if (!res) {
+    LOG_INFO("device-api: response transport error: %s",
+             describe_transport_error(res.error()).c_str());
     return ApiOutcome::failure(0, describe_transport_error(res.error()));
   }
+
+  LOG_INFO("device-api: response HTTP %d body: %s", res->status,
+           res->body.c_str());
 
   response_body = res->body;
   if (res->status >= 200 && res->status < 300) {
